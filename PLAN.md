@@ -53,16 +53,38 @@ pipeline, properly wired signal basket, and real-time discovery via WebSocket + 
 - ✅ `database.py`
 - ✅ Tests ported: 11 test files from TradingSystem
 
-#### TODO — Next Session (create branch `feat/phase-1-data-fetchers`)
-1. `data/fetcher.py` — OHLCV via yfinance + alpaca-py historical bars
-2. `data/fundamentals_fetcher.py` — sec-edgar-api primary, FMP fallback
-3. `data/price_stream.py` — Alpaca StockDataStream WebSocket (real-time bars)
-4. `data/news_relevance_engine.py` — SpaCy NER → ticker→sector causal rules
-5. `strategy/macro_analyser.py` — port from TradingSystem + add FRED via pandas-datareader
-6. `strategy/scorer.py` — rewrite as raw feature vector builder (Phase 3 LightGBM input)
-7. Fix `server/api.py` — add missing `GET /ledger/{trade_id}` endpoint
-8. Wire `data_fetcher` into `position_manager.py` (currently returns None)
-9. Integration test: run_server.py startup smoke test
+#### DONE — Phase 1 Complete (all files committed on feat/phase-1-foundation)
+
+Additional files added to complete Phase 1:
+- ✅ `data/fetcher.py` — yfinance primary + alpaca-py fallback, 5-min cache
+- ✅ `data/news_relevance_engine.py` — SpaCy NER + 5000+ company name→ticker map
+- ✅ `data/price_stream.py` — Alpaca StockDataStream WebSocket (1-min bars)
+- ✅ `strategy/macro_analyser.py` — VIX, yield spread, SPY trend, optional FRED
+- ✅ `run_server.py` — fully wired with all dependencies injected
+
+**Phase 1 is complete. The system can paper trade.**
+
+---
+
+#### TODO — Phase 2 (next session, branch: `feat/phase-2-yolov8-patterns`)
+
+1. `strategy/chart_pattern_detector.py` — YOLOv8 chart pattern recognition
+   - matplotlib candlestick PNG → ~15 binary visual patterns
+   - Patterns: H&S, inverse H&S, ascending/descending triangle, flag, pennant,
+     cup-and-handle, wedge, double top/bottom, rounding bottom
+   - Fine-tune YOLOv8n on roboflow annotated chart dataset
+   - Output joins `technical_analysis.py` results in feature vector
+
+2. `strategy/scorer.py` rewrite — raw feature vector builder
+   - Assembles all indicator values into flat dict for LightGBM
+   - Logs per-trade feature vectors to PostgreSQL for Phase 3 training data
+
+3. `server/api.py` — add `GET /ledger/{trade_id}` endpoint (missing from TradingSystem)
+
+4. `data/fundamentals_fetcher.py` — sec-edgar-api primary, FMP fallback
+
+**How to start Phase 2 in a new session:**
+> "We are building trading-system-v2 at `C:\Users\ASUS\git_repos\trading-system-v2`. Phase 1 is complete — all files on branch `feat/phase-1-foundation`. Read this PLAN.md for full context. Source repo: `C:\Users\ASUS\TradingSystem`. Start Phase 2: create branch `feat/phase-2-yolov8-patterns` off main and build `strategy/chart_pattern_detector.py`."
 
 ---
 

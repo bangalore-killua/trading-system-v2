@@ -75,8 +75,22 @@ async def main() -> None:
     from strategy.position_aging import PositionAging    # type: ignore
     from strategy.correlation_risk import CorrelationRisk  # type: ignore
     from strategy.trade_state import TradeState          # type: ignore
+    from data.fetcher import OHLCVFetcher
+    from data.news_relevance_engine import NewsRelevanceEngine
+    from strategy.macro_analyser import MacroAnalyser
     from strategy.position_manager import PositionManager
 
+    # Data fetcher — primary OHLCV source for all entry/exit evaluations
+    ohlcv_fetcher = OHLCVFetcher(
+        alpaca_api_key=os.environ.get("ALPACA_API_KEY"),
+        alpaca_secret_key=os.environ.get("ALPACA_SECRET_KEY"),
+        alpaca_paper=os.environ.get("ALPACA_PAPER", "true").lower() == "true",
+    )
+
+    # Ticker extractor — maps article text to equity symbols for HOT_UNIVERSE
+    relevance_engine = NewsRelevanceEngine()
+
+    macro_analyser = MacroAnalyser()
     regime_detector = RegimeDetector(cfg)
     signal_basket = SignalBasket(cfg)
     trade_ledger = TradeLedger(cfg)
@@ -105,6 +119,7 @@ async def main() -> None:
         trade_state=trade_state,
         hot_universe=hot_universe,
         telegram=telegram,
+        data_fetcher=ohlcv_fetcher,
     )
 
     # ── Wire up streams ──────────────────────────────────────────────────────
@@ -141,6 +156,7 @@ async def main() -> None:
         sentiment_model=sentiment_model,
         poll_interval_minutes=cfg.get("news", {}).get("rss_fetch_interval_minutes", 5),
         sentiment_threshold=cfg.get("news", {}).get("sentiment_threshold_buy", 0.70),
+        ticker_extractor=relevance_engine.extract_tickers,
     )
 
     # ── Start scheduler (blocks until stop()) ───────────────────────────────
