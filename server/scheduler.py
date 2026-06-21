@@ -58,6 +58,7 @@ class TradingScheduler:
         self.telegram = None             # TelegramAlerts
         self.training_pipeline = None    # TrainingPipeline (Phase 3)
         self.options_stream = None       # OptionDataStreamManager (Phase 4)
+        self._last_regime: str = ""      # tracks regime changes for protective put trigger
 
     async def start(self) -> None:
         """Run the full startup sequence then hand off to the scheduler loop."""
@@ -258,13 +259,23 @@ class TradingScheduler:
             logger.exception("score_watchlist job error")
 
     async def _update_regime(self) -> None:
-        """Detect current market regime (SPY trend + VIX + breadth)."""
+        """Detect current market regime (SPY trend + VIX + breadth).
+
+        After detection, if the regime has moved to LATE_BULL or EARLY_BEAR,
+        buys protective puts on all open equity positions.
+        """
         if not self.regime_detector:
             return
         try:
-            # regime_detector.detect() is typically synchronous CPU work
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self.regime_detector.detect)
+
+            new_regime = str(self.regime_detector.get_current_regime())
+            if new_regime != self._last_regime:
+                logger.info("REGIME CHANGE: %s → %s", self._last_regime or "INIT", new_regime)
+                if self.position_manager and new_regime in ("LATE_BULL", "EARLY_BEAR"):
+                    await self.position_manager.buy_protective_puts_for_regime(new_regime)
+                self._last_regime = new_regime
         except Exception:
             logger.exception("update_regime job error")
 

@@ -22,7 +22,8 @@ pipeline, properly wired signal basket, and real-time discovery via WebSocket + 
 | Phase 1 — Foundation | ✅ Complete | Merged to main via PR |
 | Phase 2 — YOLOv8 + Feature Vector | ✅ Complete | Branch: feat/phase-2-yolov8-patterns |
 | Phase 3 — LightGBM Meta-Model | ✅ Complete | Merged to main via PR |
-| Phase 4 — Options expansion | 🔨 In Progress | Branch: feat/phase-4-options |
+| Phase 4 — Options expansion | ✅ Complete | Merged to main via PR |
+| Phase 5 — Wiring gaps + migrations | 🔨 In Progress | Branch: feat/phase-5-wiring |
 
 ### Files Status (update this as work progresses)
 
@@ -112,8 +113,28 @@ Additional files added to complete Phase 1:
 - ✅ `config.json` — full `options` block (all params, disabled by default)
 - ✅ `README.md` — Phase 4 strategies table, enable instructions
 
-**How to resume Phase 4 in a new session:**
-> "We are building trading-system-v2 at `C:\Users\ASUS\git_repos\trading-system-v2`. Phases 1–3 are complete. Phase 4 options expansion is in progress on branch `feat/phase-4-options` — read PLAN.md. The core Phase 4 files are written and wired. Next: commit, push, and open PR."
+---
+
+#### IN PROGRESS — Phase 5 (branch: feat/phase-5-wiring)
+
+**Wiring gaps fixed:**
+- ✅ `server/scheduler.py` — `_update_regime()` tracks regime changes; triggers `buy_protective_puts_for_regime()` on LATE_BULL/EARLY_BEAR transition
+- ✅ `strategy/position_manager.py` — `buy_protective_puts_for_regime()`: iterates open positions, fetches current price, calls `evaluate_protective_put()` per symbol; skips already-hedged
+- ✅ `strategy/position_manager.py` — `_try_covered_call()`: writes OTM call after AGE-1 partial exit when remaining_qty >= 100
+- ✅ `strategy/position_manager.py` — `_execute_partial_exit()` passes `current_price` and fires `_try_covered_call()` automatically
+
+**Alembic migrations:**
+- ✅ `alembic.ini` — DB URL from env, not hardcoded
+- ✅ `migrations/env.py` — imports all ORM models; autogenerate-ready
+
+**How to run migrations (once DB is ready):**
+```bash
+alembic revision --autogenerate -m "initial schema"
+alembic upgrade head
+```
+
+**How to resume Phase 5 in a new session:**
+> "We are building trading-system-v2 at `C:\Users\ASUS\git_repos\trading-system-v2`. Phases 1–4 are complete. Phase 5 wiring is on branch `feat/phase-5-wiring` — read PLAN.md. Commit, push, and PR."
 
 ---
 
