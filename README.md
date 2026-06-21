@@ -198,8 +198,8 @@ trading-system-v2/
 |-------|--------|-------------|
 | **Phase 1** | ✅ Complete | Working live system: event-driven universe, 39-source news, signal basket wired, paper trading |
 | **Phase 2** | ✅ Complete | YOLOv8 visual chart pattern detection (16 patterns), ~125-feature vector builder, fundamentals fetcher |
-| **Phase 3** | 🔨 In Progress | LightGBM meta-model: triple-barrier labeling, walk-forward training, P(win) position sizing |
-| **Phase 4** | ⏳ Pending | Options expansion via alpaca-py OptionDataStream + Qlib IC factor validation |
+| **Phase 3** | ✅ Complete | LightGBM meta-model: triple-barrier labeling, walk-forward training, P(win) position sizing |
+| **Phase 4** | 🔨 In Progress | Options expansion: long calls, protective puts, covered calls via alpaca-py |
 
 ### Phase 3 — LightGBM Bootstrap Strategy
 
@@ -230,6 +230,30 @@ python -m strategy.training_pipeline --live-only
 
 # Re-validate without re-fetching data
 python -m strategy.training_pipeline --validate-only
+```
+
+### Phase 4 — Options Strategies
+
+Three strategies controlled by `config.json options` section. All disabled by default (`options.enabled: false`).
+
+| Strategy | When | Contract |
+|----------|------|----------|
+| **Long call** | Bullish entry + LightGBM P(win) ≥ 0.65 | ATM call, delta 0.40–0.60, DTE 25–50 days |
+| **Protective put** | Regime → LATE_BULL or EARLY_BEAR | OTM put 7% below price, DTE 30–60 days |
+| **Covered call** | After AGE-1 partial profit on equity | OTM call 7% above price, DTE 14–21 days |
+
+**Exit rules (all positions):**
+- Stop loss: mid drops 50% from entry premium
+- Take profit: mid doubles from entry premium
+- DTE close: ≤ 7 days to expiry (avoid gamma/pin risk)
+
+**Enable options:**
+```json
+// config.json
+"options": {
+    "enabled": true,
+    "strategies_enabled": ["long_call", "protective_put"]
+}
 ```
 
 ---

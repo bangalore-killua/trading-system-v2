@@ -172,6 +172,31 @@ async def main() -> None:
         data_fetcher=ohlcv_fetcher,
     )
     position_manager._scorer = scorer  # Phase 3: feature vector + P(win) multiplier
+    position_manager._db = db
+
+    # ── Phase 4: Options layer ───────────────────────────────────────────────
+    from data.options_chain import OptionsChainFetcher
+    from strategy.options_selector import OptionsSelector
+    from server.option_stream import OptionDataStreamManager
+
+    options_cfg = cfg.get("options", {})
+    if options_cfg.get("enabled", False):
+        options_chain_fetcher = OptionsChainFetcher(
+            api_key=os.environ["ALPACA_API_KEY"],
+            secret_key=os.environ["ALPACA_SECRET_KEY"],
+            config=cfg,
+        )
+        options_selector = OptionsSelector(chain_fetcher=options_chain_fetcher, config=cfg)
+        options_stream = OptionDataStreamManager(
+            api_key=os.environ["ALPACA_API_KEY"],
+            secret_key=os.environ["ALPACA_SECRET_KEY"],
+        )
+        position_manager._options_selector = options_selector
+        position_manager._options_stream = options_stream
+        logger.info("Phase 4 options layer enabled — strategies: %s", options_cfg.get("strategies_enabled", []))
+    else:
+        options_stream = None
+        logger.info("Phase 4 options disabled (config options.enabled=false)")
 
     # ── Wire up streams ──────────────────────────────────────────────────────
     news_stream = AlpacaNewsStream(
@@ -224,6 +249,7 @@ async def main() -> None:
     scheduler.regime_detector = regime_detector
     scheduler.telegram = telegram
     scheduler.training_pipeline = training_pipeline  # Phase 3: Sunday retrain job
+    scheduler.options_stream = options_stream        # Phase 4: option quote stream
 
     logger.info("Starting trading system...")
     await scheduler.start()

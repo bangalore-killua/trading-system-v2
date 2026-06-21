@@ -71,7 +71,11 @@ class PositionManager:
         self._news_cfg = config.get("news", {})
         self._basket_cfg = config.get("signal_basket", {})
         self._sizing_cfg = config.get("position_sizing", {})
-        self._scorer = None  # Scorer — injected after construction
+        self._options_cfg = config.get("options", {})
+        self._scorer = None        # Scorer — injected after construction
+        self._options_selector = None  # OptionsSelector — injected after construction
+        self._options_stream = None    # OptionDataStreamManager — injected after construction
+        self._db = None            # TradingDatabase — injected after construction
 
         # Pending news-driven confirms: symbol → asyncio.Event
         self._pending_news_confirms: Dict[str, asyncio.Event] = {}
@@ -265,6 +269,17 @@ class PositionManager:
             "ENTERED: %s %d shares @ $%.4f (setup=%s score=%d)",
             symbol, int(fill.filled_qty), fill.filled_avg_price, setup_type, entry_score,
         )
+
+        # ── Step 8 (Phase 4): Evaluate long call alongside equity ─────────
+        if self._options_cfg.get("enabled", False) and size_multiplier >= self._options_cfg.get(
+            "long_call_min_lgbm_confidence", 0.65
+        ):
+            await self._try_long_call(
+                symbol=symbol,
+                current_price=fill.filled_avg_price,
+                position_notional=fill.filled_qty * fill.filled_avg_price,
+            )
+
         return True
 
     async def score_watchlist(self) -> None:
@@ -560,6 +575,246 @@ class PositionManager:
         event = self._pending_news_confirms.get(symbol)
         if event:
             event.set()
+
+    # ── Options entry/exit (Phase 4) ────────────────────────────────────────
+
+    async def _try_long_call(
+        self,
+        symbol: str,
+        current_price: float,
+        position_notional: float,
+    ) -> None:
+        """Attempt to buy an ATM call alongside the equity entry.
+
+        Fires only when options.enabled=true and LightGBM confidence is high.
+        Silently skips if no suitable contract found.
+        """
+        if not self._options_selector:
+            return
+        try:
+            portfolio_value = await self._get_portfolio_value()
+            trade = self._options_selector.select_long_call(
+                symbol=symbol,
+                current_price=current_price,
+                portfolio_value=portfolio_value,
+                position_notional=position_notional,
+            )
+            if trade is None:
+                return
+
+            fill = self._trader.place_option_order(
+                contract_symbol=trade.contract.symbol,
+                side="buy",
+                qty=trade.qty,
+            )
+            if not fill.is_filled:
+                logger.warning("OPTION ORDER FAILED: %s — %s", trade.contract.symbol, fill.status)
+                return
+
+            actual_premium = fill.filled_avg_price
+            logger.info(
+                "OPTION ENTERED: %s %s qty=%d @ $%.2f/share (contract=$%.0f)",
+                trade.strategy, trade.contract.symbol,
+                fill.filled_qty, actual_premium, actual_premium * 100,
+            )
+
+            if self._db:
+                from datetime import datetime as _dt
+                self._db.open_option_position(
+                    underlying=symbol,
+                    contract_symbol=trade.contract.symbol,
+                    option_type=trade.contract.option_type,
+                    strike=trade.contract.strike,
+                    expiry=trade.contract.expiry,
+                    days_to_expiry=trade.contract.days_to_expiry,
+                    strategy=trade.strategy,
+                    qty=int(fill.filled_qty),
+                    entry_premium=actual_premium,
+                    entry_order_id=fill.order_id,
+                    delta_at_entry=trade.contract.delta,
+                    iv_at_entry=trade.contract.implied_volatility,
+                )
+
+            if self._options_stream:
+                self._options_stream.subscribe(
+                    contract_symbol=trade.contract.symbol,
+                    entry_premium=actual_premium,
+                )
+
+            if self._telegram:
+                await self._telegram.send_message(
+                    f"OPTION ENTERED ({trade.strategy})\n"
+                    f"Contract: {trade.contract.symbol}\n"
+                    f"Strike: ${trade.contract.strike:.2f}  DTE: {trade.contract.days_to_expiry}\n"
+                    f"Qty: {int(fill.filled_qty)}  Cost: ${actual_premium * 100 * fill.filled_qty:.0f}"
+                )
+
+        except Exception:
+            logger.exception("Long call entry failed for %s", symbol)
+
+    async def monitor_option_exits(self) -> None:
+        """Check all open option positions for stop-loss, take-profit, and DTE close.
+
+        Called every 15 minutes by the scheduler during market hours.
+        """
+        if not self._options_cfg.get("enabled", False):
+            return
+        if not self._db:
+            return
+
+        open_positions = self._db.get_open_option_positions()
+        if not open_positions:
+            return
+
+        stop_loss_pct = self._options_cfg.get("stop_loss_pct", 50) / 100
+        take_profit_pct = self._options_cfg.get("take_profit_pct", 100) / 100
+        dte_threshold = self._options_cfg.get("close_dte_threshold", 7)
+
+        from datetime import datetime, date as _date
+        today = _date.today()
+
+        for pos in open_positions:
+            try:
+                await self._check_option_exit(
+                    pos, today, stop_loss_pct, take_profit_pct, dte_threshold
+                )
+            except Exception:
+                logger.exception("Option exit check error for %s", pos.contract_symbol)
+
+    async def _check_option_exit(
+        self, pos, today, stop_loss_pct: float, take_profit_pct: float, dte_threshold: int
+    ) -> None:
+        """Evaluate one open option position for exit."""
+        # DTE check — prioritize before price check to avoid gamma risk
+        expiry_date = pos.expiry.date() if hasattr(pos.expiry, "date") else pos.expiry
+        dte = (expiry_date - today).days
+        if dte <= dte_threshold:
+            await self._close_option_position(pos, reason="dte_close")
+            return
+
+        # Get current quote
+        snapshot = self._trader.get_option_snapshot(pos.contract_symbol)
+        if not snapshot:
+            return
+
+        current_mid = snapshot.get("mid", 0)
+        if current_mid <= 0:
+            return
+
+        entry = pos.entry_premium
+        gain_pct = (current_mid - entry) / entry if entry > 0 else 0
+
+        if gain_pct <= -stop_loss_pct:
+            await self._close_option_position(pos, reason="stop_loss", current_mid=current_mid)
+        elif gain_pct >= take_profit_pct:
+            await self._close_option_position(pos, reason="take_profit", current_mid=current_mid)
+
+    async def _close_option_position(self, pos, reason: str, current_mid: Optional[float] = None) -> None:
+        """Place closing order and record the result."""
+        # long_call / protective_put: sell to close; covered_call: buy to close
+        close_side = "sell" if pos.strategy in ("long_call", "protective_put") else "buy"
+
+        fill = self._trader.place_option_order(
+            contract_symbol=pos.contract_symbol,
+            side=close_side,
+            qty=pos.qty,
+        )
+        if not fill.is_filled:
+            logger.warning("OPTION CLOSE FAILED: %s — %s", pos.contract_symbol, fill.status)
+            return
+
+        actual_exit = fill.filled_avg_price
+        pnl_per_share = actual_exit - pos.entry_premium
+        if pos.strategy == "covered_call":
+            pnl_per_share = pos.entry_premium - actual_exit
+        pnl = pnl_per_share * pos.qty * 100
+
+        logger.info(
+            "OPTION CLOSED: %s reason=%s qty=%d exit=$%.2f pnl=$%.0f",
+            pos.contract_symbol, reason, pos.qty, actual_exit, pnl,
+        )
+
+        if self._db:
+            self._db.close_option_position(
+                contract_symbol=pos.contract_symbol,
+                exit_premium=actual_exit,
+                exit_reason=reason,
+                exit_order_id=fill.order_id,
+            )
+
+        if self._options_stream:
+            self._options_stream.unsubscribe(pos.contract_symbol)
+
+        if self._telegram:
+            await self._telegram.send_message(
+                f"OPTION CLOSED ({reason})\n"
+                f"Contract: {pos.contract_symbol}\n"
+                f"P&L: ${pnl:+.0f}  ({pnl_per_share / pos.entry_premium * 100:+.1f}%)"
+            )
+
+    async def evaluate_protective_put(
+        self,
+        symbol: str,
+        current_price: float,
+        position_value: float,
+    ) -> None:
+        """Buy a protective put when regime deteriorates to LATE_BULL or EARLY_BEAR.
+
+        Called by the scheduler when regime changes, not on every monitoring cycle.
+        """
+        if not self._options_cfg.get("enabled", False):
+            return
+        if not self._options_selector:
+            return
+        try:
+            portfolio_value = await self._get_portfolio_value()
+            trade = self._options_selector.select_protective_put(
+                symbol=symbol,
+                current_price=current_price,
+                position_value=position_value,
+                portfolio_value=portfolio_value,
+            )
+            if trade is None:
+                return
+
+            fill = self._trader.place_option_order(
+                contract_symbol=trade.contract.symbol,
+                side="buy",
+                qty=trade.qty,
+            )
+            if not fill.is_filled:
+                logger.warning("PROTECTIVE PUT FAILED: %s — %s", trade.contract.symbol, fill.status)
+                return
+
+            logger.info(
+                "PROTECTIVE PUT ENTERED: %s qty=%d @ $%.2f/share",
+                trade.contract.symbol, fill.filled_qty, fill.filled_avg_price,
+            )
+
+            if self._db:
+                self._db.open_option_position(
+                    underlying=symbol,
+                    contract_symbol=trade.contract.symbol,
+                    option_type="put",
+                    strike=trade.contract.strike,
+                    expiry=trade.contract.expiry,
+                    days_to_expiry=trade.contract.days_to_expiry,
+                    strategy="protective_put",
+                    qty=int(fill.filled_qty),
+                    entry_premium=fill.filled_avg_price,
+                    entry_order_id=fill.order_id,
+                    delta_at_entry=trade.contract.delta,
+                    iv_at_entry=trade.contract.implied_volatility,
+                )
+
+            if self._options_stream:
+                self._options_stream.subscribe(
+                    contract_symbol=trade.contract.symbol,
+                    entry_premium=fill.filled_avg_price,
+                )
+
+        except Exception:
+            logger.exception("Protective put entry failed for %s", symbol)
 
     # ── Helpers ─────────────────────────────────────────────────────────────
 
