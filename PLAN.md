@@ -26,51 +26,65 @@ pipeline, properly wired signal basket, and real-time discovery via WebSocket + 
 
 ### Files Status (update this as work progresses)
 
-#### DONE (copied verbatim from TradingSystem or written fresh)
-- [ ] `README.md` ✅
-- [ ] `PLAN.md` ✅
-- [ ] `requirements.txt` ✅
-- [ ] `config.json` ✅
-- [ ] `.env.example` ✅
-- [ ] `.gitignore` ✅
-- [ ] `data/hot_universe.py` ✅
-- [ ] `data/news_sources.py` ✅
-- [ ] `data/news_stream.py` ✅
-- [ ] `data/edgar_monitor.py` ✅
-- [ ] `data/tv_screener.py` ✅
-- [ ] `data/news_aggregator.py` ✅
-- [ ] `strategy/threat_classifier.py` ✅
-- [ ] `strategy/technical_analysis.py` ✅
-- [ ] `strategy/news_sentiment.py` ✅
+#### DONE — Phase 1 Foundation (branch: feat/phase-1-foundation, committed bc7715f)
 
-#### TODO (next session priorities, in order)
-1. `server/scheduler.py` — APScheduler orchestrator replacing `schedule` lib
-2. `server/alpaca_trader.py` — alpaca-py rewrite with fill verification
-3. `strategy/position_manager.py` — signal basket properly wired to execution
-4. `data/fetcher.py` — OHLCV via yfinance + alpaca-py bars
-5. `data/fundamentals_fetcher.py` — sec-edgar-api primary, FMP fallback
-6. `data/price_stream.py` — Alpaca StockDataStream WebSocket
-7. `data/news_relevance_engine.py` — copy + add sector causal rules
-8. `strategy/macro_analyser.py` — keep + add FRED via pandas-datareader
-9. `strategy/scorer.py` — rewrite as feature vector builder (not weighted sum)
-10. `database.py` — SQLAlchemy models (port from TradingSystem)
-11. `server/api.py` — FastAPI routes (port from TradingSystem)
-12. **COPY from TradingSystem** (verbatim, no changes):
-    - `strategy/signal_basket.py`
-    - `strategy/signal_types.py`
-    - `strategy/regime_detector.py`
-    - `strategy/trade_ledger.py`
-    - `strategy/position_aging.py`
-    - `strategy/correlation_risk.py`
-    - `strategy/holding_tier.py`
-    - `strategy/trade_state.py`
-    - `strategy/trade_labels.py`
-    - `strategy/config_loader.py`
-    - `strategy/screener_guardrails.py`
-    - `server/kill_switch.py`
-    - `server/order_manager.py`
-    - `server/telegram_alerts.py`
-13. Port 348 tests from TradingSystem into `tests/`
+**New files written:**
+- ✅ `README.md`, `PLAN.md`, `requirements.txt`, `config.json`, `.env.example`, `.gitignore`
+- ✅ `data/hot_universe.py` — TTL cache for event-driven symbol discovery
+- ✅ `data/news_sources.py` — 39-source tier registry
+- ✅ `data/news_stream.py` — Alpaca NewsDataStream("*") WebSocket consumer
+- ✅ `data/edgar_monitor.py` — SEC EDGAR 8-K + Form 4 RSS monitor
+- ✅ `data/tv_screener.py` — TradingView Screener (all US stocks, free)
+- ✅ `data/news_aggregator.py` — async 39-source RSS aggregator with NLP
+- ✅ `strategy/threat_classifier.py` — word-list NLP: CRITICAL/HIGH/MEDIUM/LOW
+- ✅ `strategy/technical_analysis.py` — pandas-ta indicators + 60 CDL patterns
+- ✅ `strategy/news_sentiment.py` — FinBERT (yiyanghkust/finbert-tone) wrapper
+- ✅ `strategy/position_manager.py` — entry/exit with signal basket PROPERLY WIRED
+- ✅ `server/alpaca_trader.py` — alpaca-py with fill verification polling
+- ✅ `server/scheduler.py` — APScheduler orchestrator (replaces schedule lib)
+- ✅ `run_server.py` — entry point with full dependency injection
+- ✅ `tests/conftest.py`, `test_hot_universe.py`, `test_threat_classifier.py`, `test_technical_analysis.py`
+
+**Copied verbatim from TradingSystem v12.15:**
+- ✅ `strategy/`: signal_basket, signal_types, regime_detector, trade_ledger,
+  position_aging, correlation_risk, holding_tier, trade_state, trade_labels,
+  config_loader, screener_guardrails
+- ✅ `server/`: api.py, kill_switch.py, order_manager.py, telegram_alerts.py
+- ✅ `database.py`
+- ✅ Tests ported: 11 test files from TradingSystem
+
+#### DONE — Phase 1 Complete (all files committed on feat/phase-1-foundation)
+
+Additional files added to complete Phase 1:
+- ✅ `data/fetcher.py` — yfinance primary + alpaca-py fallback, 5-min cache
+- ✅ `data/news_relevance_engine.py` — SpaCy NER + 5000+ company name→ticker map
+- ✅ `data/price_stream.py` — Alpaca StockDataStream WebSocket (1-min bars)
+- ✅ `strategy/macro_analyser.py` — VIX, yield spread, SPY trend, optional FRED
+- ✅ `run_server.py` — fully wired with all dependencies injected
+
+**Phase 1 is complete. The system can paper trade.**
+
+---
+
+#### TODO — Phase 2 (next session, branch: `feat/phase-2-yolov8-patterns`)
+
+1. `strategy/chart_pattern_detector.py` — YOLOv8 chart pattern recognition
+   - matplotlib candlestick PNG → ~15 binary visual patterns
+   - Patterns: H&S, inverse H&S, ascending/descending triangle, flag, pennant,
+     cup-and-handle, wedge, double top/bottom, rounding bottom
+   - Fine-tune YOLOv8n on roboflow annotated chart dataset
+   - Output joins `technical_analysis.py` results in feature vector
+
+2. `strategy/scorer.py` rewrite — raw feature vector builder
+   - Assembles all indicator values into flat dict for LightGBM
+   - Logs per-trade feature vectors to PostgreSQL for Phase 3 training data
+
+3. `server/api.py` — add `GET /ledger/{trade_id}` endpoint (missing from TradingSystem)
+
+4. `data/fundamentals_fetcher.py` — sec-edgar-api primary, FMP fallback
+
+**How to start Phase 2 in a new session:**
+> "We are building trading-system-v2 at `C:\Users\ASUS\git_repos\trading-system-v2`. Phase 1 is complete — all files on branch `feat/phase-1-foundation`. Read this PLAN.md for full context. Source repo: `C:\Users\ASUS\TradingSystem`. Start Phase 2: create branch `feat/phase-2-yolov8-patterns` off main and build `strategy/chart_pattern_detector.py`."
 
 ---
 
