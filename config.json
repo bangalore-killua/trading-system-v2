@@ -1,12 +1,16 @@
 {
   "_comment": "All runtime config lives here. No hardcoded values in source code.",
-
   "watchlist": {
     "screener_picks": [],
     "manual_additions": [],
-    "mandatory": ["SPY", "QQQ", "GLD", "BTC-USD", "ETH-USD"]
+    "mandatory": [
+      "SPY",
+      "QQQ",
+      "GLD",
+      "BTC-USD",
+      "ETH-USD"
+    ]
   },
-
   "universe": {
     "hot_universe_ttl_hours": {
       "NEWS_EVENT": 4,
@@ -21,71 +25,77 @@
     "tv_screener_min_price_change_pct": 1.5,
     "tv_screener_top_n": 25,
     "edgar_poll_interval_seconds": 60,
-    "edgar_bullish_8k_items": ["1.01", "7.01", "8.01"],
-    "edgar_bearish_8k_items": ["1.03", "2.04", "5.02"],
+    "edgar_bullish_8k_items": [
+      "1.01",
+      "7.01",
+      "8.01"
+    ],
+    "edgar_bearish_8k_items": [
+      "1.03",
+      "2.04",
+      "5.02"
+    ],
     "volume_spike_std_deviations": 5.0,
-    "news_sentiment_threshold_hot": 0.70
+    "news_sentiment_threshold_hot": 0.7
   },
-
   "signal_basket": {
     "entry_weights": {
-      "rsi_momentum_zone":        15,
-      "price_above_20ma":         15,
-      "macd_bullish":             15,
-      "volume_confirming":        15,
-      "atr_not_extreme":           5,
-      "score_above_52pct":        15,
-      "no_major_negative_48h":    10,
-      "no_structural_sec":        10,
-      "regime_favourable":        15,
-      "vix_not_inverted":          5,
-      "daily_trend_bullish":      15,
-      "no_negative_news_48h":     20,
-      "peers_not_singled_out":    15,
-      "rsi_oversold":             20,
-      "price_above_50ma":         10,
-      "score_above_60pct":        20,
-      "insider_buying_30d":       20,
-      "estimates_rising":         15,
-      "revenue_inflecting":       20,
-      "no_value_trap":            10,
-      "strong_fundamentals":      15,
-      "positive_news_6h":         20,
-      "major_positive_event":     30,
-      "sector_positive_news":     10,
-      "sector_inflow":            10,
-      "stabilisation_4of7":       25,
-      "stabilisation_6of7":       35
+      "rsi_momentum_zone": 15,
+      "price_above_20ma": 15,
+      "macd_bullish": 15,
+      "volume_confirming": 15,
+      "atr_not_extreme": 5,
+      "score_above_52pct": 15,
+      "no_major_negative_48h": 10,
+      "no_structural_sec": 10,
+      "regime_favourable": 15,
+      "vix_not_inverted": 5,
+      "daily_trend_bullish": 15,
+      "no_negative_news_48h": 20,
+      "peers_not_singled_out": 15,
+      "rsi_oversold": 20,
+      "price_above_50ma": 10,
+      "score_above_60pct": 20,
+      "insider_buying_30d": 20,
+      "estimates_rising": 15,
+      "revenue_inflecting": 20,
+      "no_value_trap": 10,
+      "strong_fundamentals": 15,
+      "positive_news_6h": 20,
+      "major_positive_event": 30,
+      "sector_positive_news": 10,
+      "sector_inflow": 10,
+      "stabilisation_4of7": 25,
+      "stabilisation_6of7": 35
     },
     "exit_weights": {
-      "rsi_momentum_lost_2bars":    20,
-      "price_below_20ma_2bars":     20,
-      "volume_distribution":        15,
-      "macd_bearish_cross":         15,
+      "rsi_momentum_lost_2bars": 20,
+      "price_below_20ma_2bars": 20,
+      "volume_distribution": 15,
+      "macd_bearish_cross": 15,
       "score_below_exit_threshold": 20,
-      "revenue_accelerating_down":  25,
-      "insider_selling_cluster":    30,
-      "estimates_cut_twice":        20,
-      "major_negative_event":       35,
-      "negative_guidance":          25,
-      "ceo_departure":              30,
-      "regime_crash":               40,
-      "regime_deteriorated":        20
+      "revenue_accelerating_down": 25,
+      "insider_selling_cluster": 30,
+      "estimates_cut_twice": 20,
+      "major_negative_event": 35,
+      "negative_guidance": 25,
+      "ceo_departure": 30,
+      "regime_crash": 40,
+      "regime_deteriorated": 20
     },
     "entry_thresholds": {
-      "SETUP_MOMENTUM":   55,
-      "SETUP_BOUNCE":     50,
+      "SETUP_MOMENTUM": 55,
+      "SETUP_BOUNCE": 50,
       "SETUP_INFLECTION": 45,
       "SETUP_NEWS_DRIVEN": 40
     },
     "exit_thresholds": {
-      "SETUP_MOMENTUM":   45,
-      "SETUP_BOUNCE":     40,
+      "SETUP_MOMENTUM": 45,
+      "SETUP_BOUNCE": 40,
       "SETUP_INFLECTION": 60,
       "SETUP_NEWS_DRIVEN": 35
     }
   },
-
   "risk": {
     "max_position_pct": 10,
     "cash_reserve_pct": 20,
@@ -96,7 +106,6 @@
     "min_avg_volume": 500000,
     "max_spread_pct": 0.5
   },
-
   "position_sizing": {
     "base_size_pct": 5,
     "reduced_size_pct": 2.5,
@@ -108,26 +117,42 @@
     "age1_min_gain_pct": 8.0,
     "age1_min_days": 5
   },
-
   "regime": {
-    "regimes_allowed_entry": ["EARLY_BULL", "MID_BULL", "NEUTRAL"],
-    "regimes_reduced_size": ["NEUTRAL"],
-    "regimes_no_new_longs": ["LATE_BULL", "EUPHORIA", "EARLY_BEAR", "MID_BEAR", "CRASH"],
-    "regimes_exit_all": ["CRASH"],
+    "regimes_allowed_entry": [
+      "EARLY_BULL",
+      "MID_BULL",
+      "NEUTRAL"
+    ],
+    "regimes_reduced_size": [
+      "NEUTRAL"
+    ],
+    "regimes_no_new_longs": [
+      "LATE_BULL",
+      "EUPHORIA",
+      "EARLY_BEAR",
+      "MID_BEAR",
+      "CRASH"
+    ],
+    "regimes_exit_all": [
+      "CRASH"
+    ],
     "regime_update_interval_hours": 4
   },
-
   "news": {
-    "sentiment_threshold_buy": 0.70,
-    "sentiment_threshold_block": -0.50,
-    "threat_levels_block_entry": ["CRITICAL", "HIGH"],
-    "threat_levels_immediate_exit": ["CRITICAL"],
+    "sentiment_threshold_buy": 0.7,
+    "sentiment_threshold_block": -0.5,
+    "threat_levels_block_entry": [
+      "CRITICAL",
+      "HIGH"
+    ],
+    "threat_levels_immediate_exit": [
+      "CRITICAL"
+    ],
     "news_driven_confirm_timeout_minutes": 30,
     "rss_fetch_interval_minutes": 5,
     "max_article_age_hours": 72,
     "watchlist_news_cap": 50
   },
-
   "scheduler": {
     "scoring_interval_minutes": 60,
     "position_monitor_interval_minutes": 5,
@@ -138,9 +163,10 @@
     "screener_refresh_day": "sunday",
     "screener_refresh_hour": 4,
     "performance_report_hour": 16,
-    "performance_report_minute": 30
+    "performance_report_minute": 30,
+    "model_retrain_day": "sun",
+    "model_retrain_hour": 6
   },
-
   "alpaca": {
     "paper": true,
     "order_type": "market",
@@ -149,7 +175,6 @@
     "max_slippage_pct": 0.5,
     "extended_hours": false
   },
-
   "model": {
     "meta_model_enabled": false,
     "meta_model_path": "models/lgbm_meta.pkl",
@@ -158,9 +183,23 @@
     "retrain_min_samples": 500,
     "triple_barrier_atr_tp_multiplier": 3.0,
     "triple_barrier_atr_sl_multiplier": 1.5,
-    "triple_barrier_days": 10
+    "triple_barrier_days": 10,
+    "chart_pattern_model_path": "models/chart_patterns_yolov8n.pt",
+    "walk_forward_splits": 5,
+    "lgbm_params": {
+      "n_estimators": 500,
+      "learning_rate": 0.05,
+      "max_depth": 6,
+      "num_leaves": 31,
+      "min_child_samples": 20,
+      "subsample": 0.8,
+      "subsample_freq": 1,
+      "colsample_bytree": 0.8,
+      "reg_alpha": 0.1,
+      "reg_lambda": 1.0,
+      "random_state": 42
+    }
   },
-
   "performance": {
     "benchmark": "SPY",
     "report_output_dir": "logs/performance",

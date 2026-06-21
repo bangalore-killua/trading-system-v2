@@ -109,13 +109,39 @@ async def main() -> None:
         lookback_bars=60,
     )
 
+    # LightGBM meta-model — loads from disk if pkl exists, else graceful no-op
+    from strategy.meta_model import MetaModel
+    from strategy.training_pipeline import TrainingPipeline
+
+    meta_model = MetaModel(
+        model_path=cfg.get("model", {}).get(
+            "meta_model_path", "models/meta_model_lgbm.pkl"
+        ),
+        config=cfg,
+    )
+    if meta_model.is_ready:
+        logger.info("LightGBM meta-model loaded (%d features)", len(meta_model._feature_names))
+    else:
+        logger.info("LightGBM meta-model not found — using full-size for all trades (Phase 1/2 mode)")
+
+    from database import get_db
+    db = get_db()
+
     scorer = Scorer(
         config=cfg,
         chart_detector=chart_detector,
         fundamentals_fetcher=fundamentals_fetcher,
         macro_analyser=macro_analyser,
         regime_detector=regime_detector,
+        db_session=db,
+        meta_model=meta_model if meta_model.is_ready else None,
     )
+
+    training_pipeline = TrainingPipeline(
+        config=cfg,
+        db_url=os.environ.get("DATABASE_URL"),
+    )
+
     signal_basket = SignalBasket(cfg)
     trade_ledger = TradeLedger(cfg)
     position_aging = PositionAging(cfg)
@@ -145,6 +171,7 @@ async def main() -> None:
         telegram=telegram,
         data_fetcher=ohlcv_fetcher,
     )
+    position_manager._scorer = scorer  # Phase 3: feature vector + P(win) multiplier
 
     # ── Wire up streams ──────────────────────────────────────────────────────
     news_stream = AlpacaNewsStream(
@@ -196,6 +223,7 @@ async def main() -> None:
     scheduler.alpaca_trader = trader
     scheduler.regime_detector = regime_detector
     scheduler.telegram = telegram
+    scheduler.training_pipeline = training_pipeline  # Phase 3: Sunday retrain job
 
     logger.info("Starting trading system...")
     await scheduler.start()

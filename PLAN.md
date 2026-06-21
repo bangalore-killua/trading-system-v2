@@ -85,17 +85,16 @@ Additional files added to complete Phase 1:
 - ✅ `strategy/training_pipeline.py` — CLI orchestrator for historical bootstrap + live retrain
 - ✅ Tests: `test_triple_barrier.py` (22), `test_meta_model.py` (18)
 
-**TODO — Phase 3 remaining:**
-1. Wire `MetaModel` into `run_server.py` (load at startup if `models/meta_model_lgbm.pkl` exists)
-2. Wire `Scorer.get_position_size_multiplier()` → `position_manager.py` (use multiplier on `calculate_position_size()`)
-3. Add `trade_features` table to `database.py` (stores feature vectors per trade for live labeling)
-4. Nightly Sunday job in `scheduler.py` → calls `TrainingPipeline.run_live_update()` when enough samples
-5. Alembic migration for `trade_features` table
-6. Update `config.json` with all Phase 3 model params
-7. Commit + push + PR
+**Phase 3 is complete. All wiring done:**
+- ✅ `database.py` — `TradeFeatures` table + `save_trade_features()`, `label_trade_features()`, `get_labeled_features()`
+- ✅ `strategy/scorer.py` — `log_entry()` now persists to `trade_features` via `db.save_trade_features()`
+- ✅ `strategy/position_manager.py` — Scorer wired at Step 5; `get_position_size_multiplier()` scales position size; feature vector logged on every executed trade
+- ✅ `server/scheduler.py` — `_retrain_meta_model()` Sunday 6am; Telegram notification on completion
+- ✅ `run_server.py` — MetaModel auto-loaded at startup; TrainingPipeline wired to scheduler
+- ✅ `config.json` — `lgbm_params`, `walk_forward_splits`, retrain schedule, `chart_pattern_model_path`
 
-**How to resume Phase 3 in a new session:**
-> "We are building trading-system-v2 at `C:\Users\ASUS\git_repos\trading-system-v2`. Phases 1 and 2 are complete and merged. Phase 3 is in progress on branch `feat/phase-3-lightgbm`. Read PLAN.md for context. The next step is wiring MetaModel into run_server.py and position_manager.py, adding the trade_features DB table, and wiring the Sunday retrain job in scheduler.py."
+**How to start Phase 4 in a new session:**
+> "We are building trading-system-v2 at `C:\Users\ASUS\git_repos\trading-system-v2`. Phases 1, 2, and 3 are complete. Phase 3 is on branch `feat/phase-3-lightgbm` — read PLAN.md. Phase 4 is options expansion via alpaca-py OptionDataStream. After merging Phase 3 PR, create branch `feat/phase-4-options` off main."
 
 ---
 

@@ -71,6 +71,7 @@ class PositionManager:
         self._news_cfg = config.get("news", {})
         self._basket_cfg = config.get("signal_basket", {})
         self._sizing_cfg = config.get("position_sizing", {})
+        self._scorer = None  # Scorer — injected after construction
 
         # Pending news-driven confirms: symbol → asyncio.Event
         self._pending_news_confirms: Dict[str, asyncio.Event] = {}
@@ -150,7 +151,38 @@ class PositionManager:
                 logger.info("SKIP %s — Telegram confirm rejected or timed out", symbol)
                 return False
 
-        # ── Step 5: Calculate position size ────────────────────────────────
+        # ── Step 5a: Build feature vector + LightGBM size multiplier ──────────
+        fv = None
+        size_multiplier = 1.0
+        if self._scorer:
+            try:
+                fv = self._scorer.build_vector(
+                    symbol=symbol,
+                    df=df,
+                    indicators=indicators,
+                    setup_type=str(setup_type),
+                )
+                size_multiplier = self._scorer.get_position_size_multiplier(fv)
+                logger.info(
+                    "META-MODEL: %s P(win) multiplier=%.2f", symbol, size_multiplier
+                )
+            except Exception:
+                logger.exception("Scorer failed for %s — using full size", symbol)
+
+        if size_multiplier == 0.0:
+            logger.info(
+                "SKIP %s — LightGBM P(win) below minimum confidence threshold", symbol
+            )
+            # Log the skipped evaluation for training data
+            if self._scorer and fv:
+                await self._scorer.log_entry(
+                    symbol=symbol, fv=fv, entry_price=current_price,
+                    setup_type=str(setup_type), entry_score=entry_score,
+                    order_placed=False,
+                )
+            return False
+
+        # ── Step 5b: Calculate position size ───────────────────────────────
         atr = indicators.get("atr")
         portfolio_value = await self._get_portfolio_value()
         target_pct = self._sizing_cfg.get("base_size_pct", 5.0)
@@ -160,6 +192,9 @@ class PositionManager:
         if regime and str(regime) in self._cfg.get("regime", {}).get("regimes_reduced_size", []):
             target_pct = self._sizing_cfg.get("reduced_size_pct", 2.5)
             logger.info("Reduced position size due to NEUTRAL regime")
+
+        # Apply LightGBM multiplier (1.0 full / 0.5 half — never 0.0 here, caught above)
+        target_pct = target_pct * size_multiplier
 
         qty = self._trader.calculate_position_size(
             symbol=symbol,
@@ -202,6 +237,18 @@ class PositionManager:
                 price=fill.filled_avg_price,
                 setup_type=str(setup_type),
                 score=entry_score,
+            )
+
+        # Log feature vector for Phase 3 training data
+        if self._scorer and fv:
+            await self._scorer.log_entry(
+                symbol=symbol,
+                fv=fv,
+                entry_price=fill.filled_avg_price,
+                setup_type=str(setup_type),
+                entry_score=entry_score,
+                order_placed=True,
+                trade_id=fill.order_id,
             )
 
         if self._telegram:

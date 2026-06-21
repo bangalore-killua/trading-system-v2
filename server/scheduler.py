@@ -56,6 +56,7 @@ class TradingScheduler:
         self.alpaca_trader = None        # AlpacaTrader
         self.regime_detector = None      # RegimeDetector
         self.telegram = None             # TelegramAlerts
+        self.training_pipeline = None    # TrainingPipeline (Phase 3)
 
     async def start(self) -> None:
         """Run the full startup sequence then hand off to the scheduler loop."""
@@ -190,6 +191,19 @@ class TradingScheduler:
             name="Generate daily quantstats performance report",
         )
 
+        # ── Phase 3: LightGBM meta-model retrain (Sunday 6am) ──────────────
+        self._scheduler.add_job(
+            self._retrain_meta_model,
+            trigger=CronTrigger(
+                day_of_week=sched_cfg.get("model_retrain_day", "sun"),
+                hour=sched_cfg.get("model_retrain_hour", 6),
+            ),
+            id="retrain_meta_model",
+            max_instances=1,
+            misfire_grace_time=7200,
+            name="Retrain LightGBM meta-model on live trade labels",
+        )
+
         logger.info("Registered %d scheduler jobs", len(self._scheduler.get_jobs()))
 
     # ── Job implementations ─────────────────────────────────────────────────
@@ -236,6 +250,36 @@ class TradingScheduler:
         logger.info("Weekly fundamentals refresh starting...")
         # Placeholder — fundamentals_fetcher will implement this
         # Called Sunday at 2am so FMP quota resets before market open Monday
+
+    async def _retrain_meta_model(self) -> None:
+        """Sunday 6am: retrain LightGBM on live paper trade labels.
+
+        Only retrains if enough new labeled samples have accumulated since
+        last retrain (threshold: config.json model.retrain_min_samples).
+        """
+        if not self.training_pipeline:
+            logger.debug("training_pipeline not wired — skipping retrain")
+            return
+        try:
+            logger.info("Starting LightGBM meta-model retrain...")
+            result = await self.training_pipeline.run_live_update()
+            if result:
+                logger.info(
+                    "Meta-model retrain complete: samples=%d accuracy=%.3f",
+                    result.get("n_samples", 0),
+                    result.get("train_accuracy", 0),
+                )
+                if self.telegram:
+                    await self.telegram.send_message(
+                        f"🤖 Meta-model retrained\n"
+                        f"Samples: {result.get('n_samples')}\n"
+                        f"Train acc: {result.get('train_accuracy', 0):.1%}\n"
+                        f"WF P(win) acc: {result.get('avg_high_conf_accuracy', 'N/A')}"
+                    )
+            else:
+                logger.info("Retrain skipped — insufficient labeled samples")
+        except Exception:
+            logger.exception("Meta-model retrain job failed")
 
     async def _refresh_screener(self) -> None:
         """Weekly screener picks refresh — updates config watchlist."""
