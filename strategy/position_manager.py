@@ -353,7 +353,8 @@ class PositionManager:
                 symbol, pos_info, indicators
             )
             if should_partial:
-                await self._execute_partial_exit(symbol, pos_info, partial_pct)
+                current_price = indicators.get("price", 0)
+                await self._execute_partial_exit(symbol, pos_info, partial_pct, current_price)
                 return
 
         # Priority 5: Trailing stop
@@ -471,8 +472,15 @@ class PositionManager:
                 symbol, int(fill.filled_qty), fill.filled_avg_price, reason, pnl,
             )
 
-    async def _execute_partial_exit(self, symbol: str, pos_info: dict, sell_pct: float) -> None:
-        """Partial exit for AGE-1 profit taking (default: sell 50%)."""
+    async def _execute_partial_exit(
+        self, symbol: str, pos_info: dict, sell_pct: float, current_price: float = 0
+    ) -> None:
+        """Partial exit for AGE-1 profit taking (default: sell 50%).
+
+        After the partial sell, attempts to write a covered call on the remaining
+        shares when options are enabled (income strategy on a position with
+        already-realized profit).
+        """
         qty = pos_info.get("qty", 0)
         sell_qty = max(1, int(qty * sell_pct / 100))
 
@@ -482,6 +490,7 @@ class PositionManager:
 
         fill = self._trader.place_market_sell(symbol, qty=sell_qty)
         if fill.is_filled:
+            remaining_qty = qty - sell_qty
             self._state.reduce_position(symbol, sell_qty)
 
             if self._telegram:
@@ -489,13 +498,23 @@ class PositionManager:
                     symbol=symbol,
                     sold_qty=fill.filled_qty,
                     price=fill.filled_avg_price,
-                    remaining_qty=qty - sell_qty,
+                    remaining_qty=remaining_qty,
                 )
 
             logger.info(
                 "PARTIAL EXIT (AGE-1): %s sold %d of %d shares @ $%.4f",
                 symbol, int(fill.filled_qty), qty, fill.filled_avg_price,
             )
+
+            # Write covered call on remaining shares for income
+            price = current_price or fill.filled_avg_price
+            if (
+                self._options_cfg.get("enabled", False)
+                and "covered_call" in self._options_cfg.get("strategies_enabled", [])
+                and remaining_qty >= 100
+                and price > 0
+            ):
+                await self._try_covered_call(symbol, price, remaining_qty)
 
     # ── Risk checks ─────────────────────────────────────────────────────────
 
@@ -652,6 +671,73 @@ class PositionManager:
         except Exception:
             logger.exception("Long call entry failed for %s", symbol)
 
+    async def _try_covered_call(
+        self, symbol: str, current_price: float, shares_held: int
+    ) -> None:
+        """Write a covered call after AGE-1 partial exit for income on remaining shares."""
+        if not self._options_selector:
+            return
+        try:
+            trade = self._options_selector.select_covered_call(
+                symbol=symbol,
+                current_price=current_price,
+                shares_held=shares_held,
+            )
+            if trade is None:
+                return
+
+            fill = self._trader.place_option_order(
+                contract_symbol=trade.contract.symbol,
+                side="sell",  # sell to open
+                qty=trade.qty,
+            )
+            if not fill.is_filled:
+                logger.warning(
+                    "COVERED CALL WRITE FAILED: %s — %s", trade.contract.symbol, fill.status
+                )
+                return
+
+            actual_premium = fill.filled_avg_price
+            logger.info(
+                "COVERED CALL WRITTEN: %s qty=%d @ $%.2f/share (collected=$%.0f)",
+                trade.contract.symbol, fill.filled_qty,
+                actual_premium, actual_premium * 100 * fill.filled_qty,
+            )
+
+            if self._db:
+                self._db.open_option_position(
+                    underlying=symbol,
+                    contract_symbol=trade.contract.symbol,
+                    option_type="call",
+                    strike=trade.contract.strike,
+                    expiry=trade.contract.expiry,
+                    days_to_expiry=trade.contract.days_to_expiry,
+                    strategy="covered_call",
+                    qty=int(fill.filled_qty),
+                    entry_premium=actual_premium,
+                    entry_order_id=fill.order_id,
+                    delta_at_entry=trade.contract.delta,
+                    iv_at_entry=trade.contract.implied_volatility,
+                )
+
+            if self._options_stream:
+                self._options_stream.subscribe(
+                    contract_symbol=trade.contract.symbol,
+                    entry_premium=actual_premium,
+                )
+
+            if self._telegram:
+                await self._telegram.send_message(
+                    f"COVERED CALL WRITTEN\n"
+                    f"Contract: {trade.contract.symbol}\n"
+                    f"Strike: ${trade.contract.strike:.2f}  DTE: {trade.contract.days_to_expiry}\n"
+                    f"Qty: {int(fill.filled_qty)}  "
+                    f"Premium collected: ${actual_premium * 100 * fill.filled_qty:.0f}"
+                )
+
+        except Exception:
+            logger.exception("Covered call write failed for %s", symbol)
+
     async def monitor_option_exits(self) -> None:
         """Check all open option positions for stop-loss, take-profit, and DTE close.
 
@@ -751,6 +837,50 @@ class PositionManager:
                 f"Contract: {pos.contract_symbol}\n"
                 f"P&L: ${pnl:+.0f}  ({pnl_per_share / pos.entry_premium * 100:+.1f}%)"
             )
+
+    async def buy_protective_puts_for_regime(self, regime: str) -> None:
+        """Buy protective puts on all open equity positions on regime deterioration.
+
+        Called by scheduler when regime transitions to LATE_BULL or EARLY_BEAR.
+        Skips symbols that already have an open protective put in the DB.
+        """
+        if not self._options_cfg.get("enabled", False):
+            return
+        if "protective_put" not in self._options_cfg.get("strategies_enabled", []):
+            return
+
+        positions = self._state.get_all_positions()
+        if not positions:
+            return
+
+        logger.info(
+            "REGIME %s — evaluating protective puts for %d open positions",
+            regime, len(positions),
+        )
+
+        # Get already-hedged symbols to avoid double-buying
+        already_hedged = set()
+        if self._db:
+            open_opts = self._db.get_open_option_positions()
+            already_hedged = {
+                p.underlying for p in open_opts if p.strategy == "protective_put"
+            }
+
+        for symbol, pos_info in positions.items():
+            if symbol in already_hedged:
+                logger.debug("SKIP protective put %s — already hedged", symbol)
+                continue
+            try:
+                df = await self._fetch_ohlcv(symbol, bars=20)
+                current_price = (
+                    float(df["close"].iloc[-1])
+                    if df is not None and len(df) >= 2
+                    else pos_info.get("entry_price", 0)
+                )
+                position_value = pos_info.get("qty", 0) * current_price
+                await self.evaluate_protective_put(symbol, current_price, position_value)
+            except Exception:
+                logger.exception("Protective put failed for %s", symbol)
 
     async def evaluate_protective_put(
         self,
