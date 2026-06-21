@@ -328,6 +328,39 @@ class TradeLedger(Base):
     )
 
 
+# ── ML-1: Trade feature vectors (Phase 3 training data) ──────
+
+class TradeFeatures(Base):
+    """
+    Persists the full ~125-feature vector at the moment of every entry evaluation.
+    The triple_barrier_label column starts NULL and is filled when the trade closes
+    (or retroactively by the labeling script).
+    This table is the sole training data source for the LightGBM meta-model.
+    """
+    __tablename__ = "trade_features"
+
+    id                    = Column(Integer,  primary_key=True)
+    symbol                = Column(String(20), nullable=False, index=True)
+    trade_id              = Column(String(60), nullable=True, index=True)
+    evaluated_at          = Column(DateTime,   nullable=False, default=datetime.utcnow)
+    setup_type            = Column(String(30), nullable=True)
+    entry_score           = Column(Integer,    nullable=True)
+    entry_price           = Column(Float,      nullable=True)
+    order_placed          = Column(Boolean,    default=False)
+    features_json         = Column(Text,       nullable=True)  # JSON blob, all ~125 features
+    triple_barrier_label  = Column(Integer,    nullable=True)  # +1 / -1 / 0 / NULL
+    exit_date             = Column(DateTime,   nullable=True)
+    exit_price            = Column(Float,      nullable=True)
+    return_pct            = Column(Float,      nullable=True)
+    barrier_hit           = Column(String(10), nullable=True)  # "tp" / "sl" / "time"
+    created_at            = Column(DateTime,   default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_trade_features_evaluated_at", "evaluated_at"),
+        Index("ix_trade_features_label",        "triple_barrier_label"),
+    )
+
+
 # ── PERF-1: Performance summary ──────────────────────────────
 
 class PerformanceSummary(Base):
@@ -1176,6 +1209,103 @@ class TradingDatabase:
         except Exception as e:
             log.error(f"get_bundle_performance failed: {e}")
             return []
+
+    # ── Trade Features (Phase 3 ML training data) ────────────
+
+    def save_trade_features(
+        self,
+        symbol: str,
+        evaluated_at: datetime,
+        setup_type: str,
+        entry_score: int,
+        entry_price: float,
+        order_placed: bool,
+        features_json: str,
+        trade_id: Optional[str] = None,
+    ) -> None:
+        """Persist a feature vector row. Called by Scorer.log_entry() on every evaluation."""
+        try:
+            with get_session() as session:
+                row = TradeFeatures(
+                    symbol=symbol,
+                    trade_id=trade_id,
+                    evaluated_at=evaluated_at,
+                    setup_type=setup_type,
+                    entry_score=entry_score,
+                    entry_price=entry_price,
+                    order_placed=order_placed,
+                    features_json=features_json,
+                )
+                session.add(row)
+        except Exception as e:
+            log.error("save_trade_features failed for %s: %s", symbol, e)
+
+    def label_trade_features(
+        self,
+        trade_id: str,
+        label: int,
+        exit_date: datetime,
+        exit_price: float,
+        return_pct: float,
+        barrier_hit: str,
+    ) -> None:
+        """Fill in the triple-barrier label when a trade closes."""
+        try:
+            with get_session() as session:
+                row = (
+                    session.query(TradeFeatures)
+                    .filter(TradeFeatures.trade_id == trade_id)
+                    .first()
+                )
+                if row:
+                    row.triple_barrier_label = label
+                    row.exit_date  = exit_date
+                    row.exit_price = exit_price
+                    row.return_pct = return_pct
+                    row.barrier_hit = barrier_hit
+        except Exception as e:
+            log.error("label_trade_features failed for trade %s: %s", trade_id, e)
+
+    def get_labeled_features(self) -> List[Dict[str, Any]]:
+        """Return all rows with a non-NULL triple_barrier_label (for model training)."""
+        try:
+            with get_session() as session:
+                rows = (
+                    session.query(TradeFeatures)
+                    .filter(TradeFeatures.triple_barrier_label.isnot(None))
+                    .order_by(TradeFeatures.evaluated_at)
+                    .all()
+                )
+                return [
+                    {
+                        "symbol":      r.symbol,
+                        "trade_id":    r.trade_id,
+                        "evaluated_at": r.evaluated_at.isoformat() if r.evaluated_at else None,
+                        "setup_type":  r.setup_type,
+                        "entry_price": r.entry_price,
+                        "features_json": r.features_json,
+                        "label":       r.triple_barrier_label,
+                        "barrier_hit": r.barrier_hit,
+                        "return_pct":  r.return_pct,
+                    }
+                    for r in rows
+                ]
+        except Exception as e:
+            log.error("get_labeled_features failed: %s", e)
+            return []
+
+    def count_labeled_features(self) -> int:
+        """Quick count of labeled rows — used to decide when to trigger retrain."""
+        try:
+            with get_session() as session:
+                return (
+                    session.query(TradeFeatures)
+                    .filter(TradeFeatures.triple_barrier_label.isnot(None))
+                    .count()
+                )
+        except Exception as e:
+            log.error("count_labeled_features failed: %s", e)
+            return 0
 
     # ── Migration ─────────────────────────────────────────────
 

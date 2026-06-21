@@ -19,9 +19,9 @@ pipeline, properly wired signal basket, and real-time discovery via WebSocket + 
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| Phase 1 — Foundation | 🔨 In Progress | See "Files Status" below |
-| Phase 2 — Candlestick patterns | ⏳ Not started | Needs Phase 1 complete |
-| Phase 3 — LightGBM meta-model | ⏳ Not started | Needs 2-3 months of Phase 1 trade data |
+| Phase 1 — Foundation | ✅ Complete | Merged to main via PR |
+| Phase 2 — YOLOv8 + Feature Vector | ✅ Complete | Branch: feat/phase-2-yolov8-patterns |
+| Phase 3 — LightGBM Meta-Model | 🔨 In Progress | Branch: feat/phase-3-lightgbm |
 | Phase 4 — Options expansion | ⏳ Not started | Needs Phase 3 |
 
 ### Files Status (update this as work progresses)
@@ -66,25 +66,35 @@ Additional files added to complete Phase 1:
 
 ---
 
-#### TODO — Phase 2 (next session, branch: `feat/phase-2-yolov8-patterns`)
+#### DONE — Phase 2 (branch: feat/phase-2-yolov8-patterns, merged to main)
 
-1. `strategy/chart_pattern_detector.py` — YOLOv8 chart pattern recognition
-   - matplotlib candlestick PNG → ~15 binary visual patterns
-   - Patterns: H&S, inverse H&S, ascending/descending triangle, flag, pennant,
-     cup-and-handle, wedge, double top/bottom, rounding bottom
-   - Fine-tune YOLOv8n on roboflow annotated chart dataset
-   - Output joins `technical_analysis.py` results in feature vector
+- ✅ `strategy/chart_pattern_detector.py` — YOLOv8 visual chart pattern recognition (16 patterns)
+  Graceful degradation: returns all-zero dict until `models/chart_patterns_yolov8n.pt` is trained.
+- ✅ `strategy/scorer.py` — FeatureVector builder (~125 features) + async PostgreSQL logger
+- ✅ `data/fundamentals_fetcher.py` — SEC EDGAR XBRL primary, FMP fallback, weekly cache
+- ✅ `server/api.py` — added `GET /api/ledger/trade/{trade_id}` (was missing)
+- ✅ Tests: `test_chart_pattern_detector.py` (11), `test_scorer.py` (16)
 
-2. `strategy/scorer.py` rewrite — raw feature vector builder
-   - Assembles all indicator values into flat dict for LightGBM
-   - Logs per-trade feature vectors to PostgreSQL for Phase 3 training data
+---
 
-3. `server/api.py` — add `GET /ledger/{trade_id}` endpoint (missing from TradingSystem)
+#### IN PROGRESS — Phase 3 (branch: feat/phase-3-lightgbm)
 
-4. `data/fundamentals_fetcher.py` — sec-edgar-api primary, FMP fallback
+**Files written:**
+- ✅ `strategy/triple_barrier.py` — TP/SL/time barrier labeling (López de Prado)
+- ✅ `strategy/meta_model.py` — LightGBM multi-class wrapper (train, predict_proba, save/load, WF-validate)
+- ✅ `strategy/training_pipeline.py` — CLI orchestrator for historical bootstrap + live retrain
+- ✅ Tests: `test_triple_barrier.py` (22), `test_meta_model.py` (18)
 
-**How to start Phase 2 in a new session:**
-> "We are building trading-system-v2 at `C:\Users\ASUS\git_repos\trading-system-v2`. Phase 1 is complete — all files on branch `feat/phase-1-foundation`. Read this PLAN.md for full context. Source repo: `C:\Users\ASUS\TradingSystem`. Start Phase 2: create branch `feat/phase-2-yolov8-patterns` off main and build `strategy/chart_pattern_detector.py`."
+**Phase 3 is complete. All wiring done:**
+- ✅ `database.py` — `TradeFeatures` table + `save_trade_features()`, `label_trade_features()`, `get_labeled_features()`
+- ✅ `strategy/scorer.py` — `log_entry()` now persists to `trade_features` via `db.save_trade_features()`
+- ✅ `strategy/position_manager.py` — Scorer wired at Step 5; `get_position_size_multiplier()` scales position size; feature vector logged on every executed trade
+- ✅ `server/scheduler.py` — `_retrain_meta_model()` Sunday 6am; Telegram notification on completion
+- ✅ `run_server.py` — MetaModel auto-loaded at startup; TrainingPipeline wired to scheduler
+- ✅ `config.json` — `lgbm_params`, `walk_forward_splits`, retrain schedule, `chart_pattern_model_path`
+
+**How to start Phase 4 in a new session:**
+> "We are building trading-system-v2 at `C:\Users\ASUS\git_repos\trading-system-v2`. Phases 1, 2, and 3 are complete. Phase 3 is on branch `feat/phase-3-lightgbm` — read PLAN.md. Phase 4 is options expansion via alpaca-py OptionDataStream. After merging Phase 3 PR, create branch `feat/phase-4-options` off main."
 
 ---
 

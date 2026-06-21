@@ -315,34 +315,30 @@ class Scorer:
         setup_type: str,
         entry_score: int,
         order_placed: bool,
+        trade_id: Optional[str] = None,
     ) -> None:
-        """Persist the feature vector to PostgreSQL for Phase 3 training.
+        """Persist the feature vector to PostgreSQL (trade_features table).
 
-        Each row in the trade_features table has:
-          - All ~125 feature values at time of entry evaluation
-          - Whether an order was placed
-          - The triple-barrier label is filled in later when the trade closes
-            (or via retroactive labeling script)
+        The triple_barrier_label column stays NULL until the trade closes or
+        the retroactive labeling script fills it in.
         """
         if self._db is None:
             return
 
         try:
-            record = {
-                "symbol": symbol,
-                "evaluated_at": datetime.utcnow().isoformat(),
-                "setup_type": setup_type,
-                "entry_score": entry_score,
-                "entry_price": entry_price,
-                "order_placed": order_placed,
-                "features_json": json.dumps(fv.to_dict(), default=str),
-                "triple_barrier_label": None,  # filled when trade closes
-            }
-            # Actual DB insert happens via SQLAlchemy model in database.py
-            # Deferred to avoid circular import — scheduler wires this up
+            self._db.save_trade_features(
+                symbol=symbol,
+                evaluated_at=datetime.utcnow(),
+                setup_type=setup_type,
+                entry_score=entry_score,
+                entry_price=entry_price,
+                order_placed=order_placed,
+                features_json=json.dumps(fv.to_dict(), default=str),
+                trade_id=trade_id,
+            )
             logger.debug(
-                "Feature vector logged for %s (%d features)",
-                symbol, fv.feature_count(),
+                "Feature vector logged for %s (trade=%s, %d features)",
+                symbol, trade_id, fv.feature_count(),
             )
         except Exception:
             logger.exception("Failed to log feature vector for %s", symbol)

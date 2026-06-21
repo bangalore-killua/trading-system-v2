@@ -158,8 +158,9 @@ trading-system-v2/
 │   ├── macro_analyser.py            ← VIX + yield curve + FRED + Fear&Greed
 │   ├── position_manager.py          ← entry/exit logic with signal basket WIRED
 │   ├── scorer.py                    ← feature vector builder (input to LightGBM)
-│   ├── meta_model.py                ← LightGBM wrapper — Phase 3+
-│   ├── triple_barrier.py            ← training label generation — Phase 3+
+│   ├── meta_model.py                ← [Phase 3] LightGBM multi-class wrapper, WF-validate, save/load
+│   ├── triple_barrier.py            ← [Phase 3] TP/SL/time label generation (López de Prado)
+│   ├── training_pipeline.py         ← [Phase 3] bootstrap + live-label retrain CLI
 │   ├── screener_guardrails.py       ← [COPIED] fundamental quality filters
 │   └── performance_calculator.py   ← quantstats wrapper
 │
@@ -195,10 +196,41 @@ trading-system-v2/
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| **Phase 1** | 🔨 In Progress | Working live system: event-driven universe, 39-source news, signal basket wired, paper trading |
-| **Phase 2** | ⏳ Pending | Candlestick patterns: pandas-ta rule-based + YOLOv8 visual chart pattern detection |
-| **Phase 3** | ⏳ Pending | LightGBM meta-model: triple-barrier labeling, walk-forward training via PyBroker |
+| **Phase 1** | ✅ Complete | Working live system: event-driven universe, 39-source news, signal basket wired, paper trading |
+| **Phase 2** | ✅ Complete | YOLOv8 visual chart pattern detection (16 patterns), ~125-feature vector builder, fundamentals fetcher |
+| **Phase 3** | 🔨 In Progress | LightGBM meta-model: triple-barrier labeling, walk-forward training, P(win) position sizing |
 | **Phase 4** | ⏳ Pending | Options expansion via alpaca-py OptionDataStream + Qlib IC factor validation |
+
+### Phase 3 — LightGBM Bootstrap Strategy
+
+```
+Two data paths feed the meta-model:
+
+PATH A (retroactive bootstrap, run once):
+  yfinance 5yr OHLCV → TripleBarrierLabeler → feature vectors → ~50k labeled samples
+
+PATH B (live paper trades, ongoing):
+  Paper trade closes → triple-barrier label recorded → appended to training set
+
+Train when: total samples ≥ config.json model.retrain_min_samples (default 500)
+Validate:   TimeSeriesSplit walk-forward, n_splits=5 (no lookahead bias)
+Threshold:  P(win) ≥ 0.65 → full size  |  0.52–0.65 → half size  |  < 0.52 → skip
+```
+
+**Phase 3 CLI:**
+```bash
+# Bootstrap from 5yr historical data for watchlist symbols
+python -m strategy.training_pipeline --years 5
+
+# Bootstrap for specific symbols
+python -m strategy.training_pipeline --symbols AAPL MSFT NVDA GOOGL --years 5
+
+# Retrain using only live paper trade labels
+python -m strategy.training_pipeline --live-only
+
+# Re-validate without re-fetching data
+python -m strategy.training_pipeline --validate-only
+```
 
 ---
 
