@@ -1322,6 +1322,38 @@ def ledger_closed(days: int = 90):
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/api/ledger/trade/{trade_id}")
+def ledger_by_trade_id(trade_id: str):
+    """Fetch a single trade record by its unique trade_id."""
+    try:
+        from database import get_db, TradeLedger
+        db  = get_db()
+        row = db._get_session().__enter__().query(TradeLedger).filter(
+            TradeLedger.trade_id == trade_id
+        ).first()
+        if not row:
+            return {"status": "error", "message": f"Trade {trade_id} not found"}
+        return {
+            "status": "ok",
+            "data": {
+                "trade_id":     row.trade_id,
+                "symbol":       row.symbol,
+                "entry_date":   str(row.entry_date),
+                "entry_price":  row.entry_price,
+                "exit_date":    str(row.exit_date) if row.exit_date else None,
+                "exit_price":   row.exit_price,
+                "return_pct":   row.return_pct,
+                "days_held":    row.days_held,
+                "setup_type":   row.setup_type,
+                "exit_reason":  row.exit_reason,
+                "basket_score": row.basket_score_entry,
+                "regime":       row.regime_entry,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/api/ledger/{symbol}")
 def ledger_symbol(symbol: str):
     """All trades for one symbol (newest first)."""

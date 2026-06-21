@@ -60,3 +60,8 @@ python-telegram-bot==21.8
 cachetools==5.5.0                  # TTL + LRU caches
 python-dateutil==2.9.0
 websockets==14.1                   # WebSocket client (used by alpaca-py streams)
+
+# ── Phase 2: Chart Pattern Detection (YOLOv8) ────────────────────────────────
+ultralytics==8.3.40                # YOLOv8 inference + training
+mplfinance==0.12.10b0              # Candlestick chart image generation
+Pillow==11.0.0                     # Image I/O for YOLOv8 input pipeline

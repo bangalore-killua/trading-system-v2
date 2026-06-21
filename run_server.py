@@ -77,7 +77,10 @@ async def main() -> None:
     from strategy.trade_state import TradeState          # type: ignore
     from data.fetcher import OHLCVFetcher
     from data.news_relevance_engine import NewsRelevanceEngine
+    from data.fundamentals_fetcher import FundamentalsFetcher
     from strategy.macro_analyser import MacroAnalyser
+    from strategy.chart_pattern_detector import ChartPatternDetector
+    from strategy.scorer import Scorer
     from strategy.position_manager import PositionManager
 
     # Data fetcher — primary OHLCV source for all entry/exit evaluations
@@ -92,6 +95,27 @@ async def main() -> None:
 
     macro_analyser = MacroAnalyser()
     regime_detector = RegimeDetector(cfg)
+
+    fundamentals_fetcher = FundamentalsFetcher(
+        fmp_api_key=os.environ.get("FMP_API_KEY", ""),
+    )
+
+    # YOLOv8 chart pattern detector — returns all-zero until model is trained
+    chart_detector = ChartPatternDetector(
+        model_path=cfg.get("model", {}).get(
+            "chart_pattern_model_path", "models/chart_patterns_yolov8n.pt"
+        ),
+        confidence_threshold=0.40,
+        lookback_bars=60,
+    )
+
+    scorer = Scorer(
+        config=cfg,
+        chart_detector=chart_detector,
+        fundamentals_fetcher=fundamentals_fetcher,
+        macro_analyser=macro_analyser,
+        regime_detector=regime_detector,
+    )
     signal_basket = SignalBasket(cfg)
     trade_ledger = TradeLedger(cfg)
     position_aging = PositionAging(cfg)
