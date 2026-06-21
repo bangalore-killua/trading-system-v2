@@ -1,0 +1,1483 @@
+# api.py
+# v5.0 — FastAPI backend
+# Serves live signals, portfolio data, trades and news
+# as a JSON API consumed by the dashboard frontend
+#
+# Watchlist structure (v4.1):
+#   config.json watchlist is a dict with three buckets:
+#     screener_picks   — top 30 from weekly screen
+#     manual_additions — user-added, never auto-removed
+#     mandatory        — always present (BTC, ETH, SPY etc)
+
+import os
+import sys
+import json
+import threading
+from datetime import datetime
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from concurrent.futures import ThreadPoolExecutor
+from strategy.scorer import StockScorer
+from strategy.trade_state import TradeStateManager
+
+scorer      = StockScorer()
+trade_state = TradeStateManager()
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'config.json')
+
+
+def load_config() -> dict:
+    """Uses the 60-second TTL cache from config_loader — no disk read per request."""
+    try:
+        from strategy.config_loader import load_config as _cached_load
+        result = _cached_load()
+        if result:
+            return result
+    except Exception:
+        pass
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {
+            "watchlist": {
+                "screener_picks":   [],
+                "manual_additions": ["AAPL", "MSFT", "GOOGL", "BTC-USD", "ETH-USD"],
+                "mandatory":        ["BTC-USD", "ETH-USD", "SPY", "QQQ", "GLD"],
+            }
+        }
+
+
+def save_config(config: dict) -> bool:
+    try:
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(config, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from data.fetcher import MarketDataFetcher
+from strategy.technical_analysis import TechnicalAnalysis
+from strategy.news_sentiment import NewsSentimentAnalyser
+
+app = FastAPI(title="Trading System API", version="6.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+fetcher   = MarketDataFetcher()
+ta        = TechnicalAnalysis()
+sentiment = NewsSentimentAnalyser()
+
+
+def _get_combined_watchlist(config: dict = None) -> list:
+    if config is None:
+        config = load_config()
+    wl = config.get("watchlist", {})
+    if isinstance(wl, list):
+        return wl if wl else ["AAPL", "MSFT", "GOOGL", "BTC-USD", "ETH-USD"]
+    picks  = wl.get("screener_picks",   [])
+    manual = wl.get("manual_additions", [])
+    mand   = wl.get("mandatory", ["BTC-USD", "ETH-USD", "SPY", "QQQ", "GLD"])
+    seen     = set()
+    combined = []
+    for sym in picks + manual + mand:
+        if sym not in seen:
+            seen.add(sym)
+            combined.append(sym)
+    return combined if combined else ["AAPL", "MSFT", "GOOGL", "BTC-USD", "ETH-USD"]
+
+
+
+# ── Health check ──────────────────────────────────────────────
+
+@app.get("/")
+def root():
+    return {
+        "status":    "running",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "version":   "5.0.0"
+    }
+
+
+# ── Prices ────────────────────────────────────────────────────
+
+@app.get("/api/prices")
+def get_prices():
+    try:
+        df = fetcher.get_multiple_prices(_get_combined_watchlist())
+        return {"status": "ok", "data": df.to_dict(orient="records")}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Signals ───────────────────────────────────────────────────
+
+@app.get("/api/signals")
+def get_signals():
+    cache_path = os.path.join(
+        os.path.dirname(__file__), '..', 'logs', 'latest_signals.json'
+    )
+
+    # try database first
+    try:
+        from database import get_db
+        db_signals = get_db().get_latest_signals()
+        if db_signals:
+            return {"status": "ok", "source": "database", "data": db_signals}
+    except Exception:
+        pass
+
+    # fallback to JSON cache
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r") as f:
+                cached = json.load(f)
+            age = (
+                datetime.now() -
+                datetime.fromtimestamp(os.path.getmtime(cache_path))
+            ).seconds
+            return {
+                "status":    "ok",
+                "source":    "cache",
+                "cache_age": f"{age // 60}m {age % 60}s ago",
+                "data":      cached,
+            }
+        except Exception:
+            pass
+
+    # no cache — calculate live
+    current_watchlist = _get_combined_watchlist()
+
+    def score_symbol(symbol):
+        try:
+            sc = scorer.score(symbol)
+            return {
+                "symbol":           symbol,
+                "price":            sc.get("price", 0),
+                "rsi":              sc.get("rsi", 0),
+                "signal":           (1 if sc.get("signal") == "BUY" else
+                                     -1 if sc.get("signal") == "SELL" else 0),
+                "signal_label":     sc.get("signal_label",
+                                           sc.get("signal", "HOLD")),
+                "signal_type":      sc.get("signal_type", "HOLD"),
+                "overall_display":  sc.get("overall_display", ""),
+                "normalised_score": sc.get("normalised_score", 0),
+                "score_velocity":   sc.get("score_velocity", 0),
+                "conviction":       sc.get("conviction", ""),
+                "bundle_name":      sc.get("bundle_name", ""),
+                "bundle_emoji":     sc.get("bundle_emoji", ""),
+                "asset_class":      sc.get("bundle_id", ""),
+                "tier_id":          sc.get("tier_id", ""),
+                "timestamp":        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        except Exception as e:
+            return {"symbol": symbol, "error": str(e), "signal": 0,
+                    "signal_label": "ERROR", "asset_class": "unknown"}
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = list(executor.map(score_symbol, current_watchlist))
+
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    with open(cache_path, "w") as f:
+        json.dump(results, f, indent=2)
+
+    return {"status": "ok", "source": "live", "data": results}
+
+
+@app.get("/api/signals/refresh")
+def refresh_signals():
+    cache_path = os.path.join(
+        os.path.dirname(__file__), '..', 'logs', 'latest_signals.json'
+    )
+    current_watchlist = _get_combined_watchlist()
+
+    def score_symbol(symbol):
+        try:
+            sc = scorer.score(symbol)
+            return {
+                "symbol":           symbol,
+                "price":            sc.get("price", 0),
+                "signal":           (1 if sc.get("signal") == "BUY" else
+                                     -1 if sc.get("signal") == "SELL" else 0),
+                "signal_label":     sc.get("signal_label",
+                                           sc.get("signal", "HOLD")),
+                "signal_type":      sc.get("signal_type", "HOLD"),
+                "overall_display":  sc.get("overall_display", ""),
+                "normalised_score": sc.get("normalised_score", 0),
+                "score_velocity":   sc.get("score_velocity", 0),
+                "conviction":       sc.get("conviction", ""),
+                "bundle_name":      sc.get("bundle_name", ""),
+                "bundle_emoji":     sc.get("bundle_emoji", ""),
+                "asset_class":      sc.get("bundle_id", ""),
+                "tier_id":          sc.get("tier_id", ""),
+                "timestamp":        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        except Exception as e:
+            return {"symbol": symbol, "error": str(e), "signal": 0,
+                    "signal_label": "ERROR", "asset_class": "unknown"}
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = list(executor.map(score_symbol, current_watchlist))
+
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    with open(cache_path, "w") as f:
+        json.dump(results, f, indent=2)
+
+    return {"status": "ok", "source": "live",
+            "message": f"Refreshed {len(results)} symbols", "data": results}
+
+
+# ── Sentiment / Sector / Insider ──────────────────────────────
+
+@app.get("/api/sentiment/{symbol}")
+def get_sentiment(symbol: str):
+    try:
+        company_names = {
+            "AAPL": "Apple", "MSFT": "Microsoft",
+            "GOOGL": "Google", "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum",
+        }
+        company = company_names.get(symbol, symbol)
+        result  = sentiment.analyse(symbol=symbol, company_name=company)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/fundamentals/{symbol}")
+def get_fundamentals(symbol: str):
+    try:
+        data = fetcher.get_fundamentals(symbol)
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/sector/{symbol}")
+def get_sector(symbol: str):
+    try:
+        sector = fetcher.get_sector_context(symbol)
+        rs     = fetcher.get_relative_strength(symbol)
+        return {"status": "ok", "data": {"sector_context": sector, "relative_strength": rs}}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/insider/{symbol}")
+def get_insider(symbol: str):
+    try:
+        trades = fetcher.get_insider_trades(symbol)
+        return {"status": "ok", "data": trades}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/analyst/{symbol}")
+def get_analyst_ratings(symbol: str):
+    """Returns recent analyst upgrades/downgrades for a symbol."""
+    try:
+        from data.news_aggregator import get_news_aggregator
+        ratings = get_news_aggregator().scrape_finviz_analyst_ratings(
+            symbol.upper().strip()
+        )
+        return {"status": "ok", "data": ratings}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/llm/status")
+def get_llm_status():
+    """Returns current LLM enabled state, mode, and whether API key is set."""
+    try:
+        from strategy.config_loader import load_config
+        cfg     = load_config()
+        enabled = bool(cfg.get("llm_enabled", False))
+        mode    = cfg.get("llm_mode", "shadow")
+        has_key = bool(os.getenv("ANTHROPIC_API_KEY", ""))
+        return {
+            "status": "ok",
+            "data": {
+                "enabled":  enabled,
+                "mode":     mode,
+                "has_key":  has_key,
+                "ready":    enabled and has_key,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/llm/toggle")
+async def toggle_llm(request: Request):
+    """Enable or disable LLM analysis. Persists to config.json."""
+    try:
+        body    = await request.json()
+        enabled = bool(body.get("enabled", False))
+        cfg     = load_config()
+        cfg["llm_enabled"] = enabled
+        save_config(cfg)
+        # Invalidate config_loader TTL cache so next cycle picks it up
+        try:
+            import strategy.config_loader as _cl
+            _cl._config_cache["expires"] = 0.0
+        except Exception:
+            pass
+        return {
+            "status":  "ok",
+            "enabled": enabled,
+            "message": f"LLM analysis {'enabled' if enabled else 'disabled'}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/llm/mode")
+async def set_llm_mode(request: Request):
+    """Set LLM mode: shadow | advisory | full. Persists to config.json."""
+    try:
+        body = await request.json()
+        mode = body.get("mode", "shadow")
+        if mode not in ("shadow", "advisory", "full"):
+            return {
+                "status":  "error",
+                "message": "mode must be shadow | advisory | full",
+            }
+        cfg = load_config()
+        cfg["llm_mode"] = mode
+        save_config(cfg)
+        try:
+            import strategy.config_loader as _cl
+            _cl._config_cache["expires"] = 0.0
+        except Exception:
+            pass
+        return {
+            "status": "ok",
+            "mode":   mode,
+            "message": f"LLM mode set to {mode}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/market/breadth")
+def get_market_breadth_endpoint():
+    """V12-12: Market breadth indicators — futures, VIX term, sector rotation."""
+    try:
+        from data.fundamentals_fetcher import get_market_breadth
+        return {"status": "ok", "data": get_market_breadth()}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/fed-watch")
+def get_fed_watch():
+    """Returns CME FedWatch rate-move probability."""
+    try:
+        from data.news_aggregator import get_news_aggregator
+        data = get_news_aggregator().scrape_cme_fedwatch()
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/economic-calendar")
+def get_economic_calendar():
+    """Returns upcoming US high-impact economic events."""
+    try:
+        from data.news_aggregator import get_news_aggregator
+        data = get_news_aggregator().scrape_investing_calendar(
+            days_ahead=7
+        )
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Watchlist ─────────────────────────────────────────────────
+
+@app.get("/api/watchlist")
+def get_watchlist():
+    config = load_config()
+    return {"status": "ok", "data": _get_combined_watchlist(config)}
+
+
+@app.get("/api/watchlist/buckets")
+async def get_watchlist_buckets():
+    try:
+        from strategy.bundle_manager import get_bundle_manager
+        bm     = get_bundle_manager()
+        config = load_config()
+        wl     = config.get("watchlist", {})
+
+        if isinstance(wl, list):
+            picks = []; manual = wl
+            mandatory = ["BTC-USD", "ETH-USD", "SPY", "QQQ", "GLD"]
+        else:
+            picks     = wl.get("screener_picks",   [])
+            manual    = wl.get("manual_additions", [])
+            mandatory = wl.get("mandatory", ["BTC-USD", "ETH-USD", "SPY", "QQQ", "GLD"])
+
+        def enrich(symbols, bucket):
+            result = []
+            for sym in symbols:
+                try:
+                    info = bm.get_bundle_info(sym)
+                    result.append({
+                        "symbol": sym, "bucket": bucket,
+                        "bundle_id": info["bundle_id"],
+                        "bundle_name": info["bundle_name"],
+                        "bundle_emoji": info["bundle_emoji"],
+                    })
+                except Exception:
+                    result.append({
+                        "symbol": sym, "bucket": bucket,
+                        "bundle_id": "unknown", "bundle_name": "Unknown",
+                        "bundle_emoji": "📌",
+                    })
+            return result
+
+        return {
+            "status": "ok",
+            "data": {
+                "screener_picks":   enrich(picks,     "screener"),
+                "manual_additions": enrich(manual,    "manual"),
+                "mandatory":        enrich(mandatory, "mandatory"),
+                "totals": {
+                    "screener_picks":   len(picks),
+                    "manual_additions": len(manual),
+                    "mandatory":        len(mandatory),
+                    "combined":         len(set(picks + manual + mandatory)),
+                },
+                "screen_settings": config.get("screen_settings", {}),
+            }
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/watchlist/add")
+def add_ticker(symbol: str):
+    try:
+        symbol  = symbol.upper().strip()
+        test_df = fetcher.get_price_history(symbol, period="5d")
+        if test_df.empty:
+            return {"status": "error", "message": f"{symbol} not found"}
+        config = load_config()
+        wl     = config.get("watchlist", {})
+        if isinstance(wl, list):
+            config["watchlist"] = {
+                "screener_picks": [], "manual_additions": wl,
+                "mandatory": ["BTC-USD", "ETH-USD", "SPY", "QQQ", "GLD"],
+            }
+            wl = config["watchlist"]
+        manual   = wl.setdefault("manual_additions", [])
+        combined = _get_combined_watchlist(config)
+        if symbol in combined:
+            return {"status": "error", "message": f"{symbol} already in watchlist"}
+        manual.append(symbol)
+        save_config(config)
+        return {"status": "ok", "message": f"{symbol} added to watchlist", "watchlist": _get_combined_watchlist()}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/watchlist/hygiene-preview")
+def hygiene_preview():
+    """V12-3: Preview symbols that would be removed on next hygiene run."""
+    try:
+        from database import get_db
+        from strategy.trade_state import TradeStateManager
+        TIER1_PROTECTED = {"BTC-USD", "ETH-USD", "SPY", "QQQ", "GLD", "SLV"}
+        open_syms   = set(TradeStateManager().get_symbols_to_monitor())
+        config      = load_config()
+        manual      = set(
+            config.get("watchlist", {}).get("manual_additions", [])
+        )
+        candidates  = get_db().get_hygiene_candidates()
+        eligible    = [
+            c for c in candidates
+            if c["symbol"] not in open_syms
+            and c["symbol"] not in TIER1_PROTECTED
+            and c["symbol"] not in manual
+        ]
+        return {"status": "ok", "data": eligible, "count": len(eligible)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/watchlist/restore/{symbol}")
+def restore_archived_symbol(symbol: str):
+    """V12-3: Move a symbol from watchlist_archived back to screener_picks."""
+    try:
+        symbol  = symbol.upper().strip()
+        config  = load_config()
+        archived = config.get("watchlist_archived", [])
+        if symbol not in archived:
+            return {"status": "error",
+                    "message": f"{symbol} not in archived list"}
+        archived.remove(symbol)
+        picks = config.get("watchlist", {}).get("screener_picks", [])
+        if symbol not in picks:
+            picks.append(symbol)
+        config["watchlist_archived"]                = archived
+        config.setdefault("watchlist", {})["screener_picks"] = picks
+        save_config(config)
+        return {"status": "ok",
+                "message": f"{symbol} restored to screener_picks"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.delete("/api/watchlist/remove")
+def remove_ticker(symbol: str):
+    try:
+        symbol = symbol.upper().strip()
+        config = load_config()
+        wl     = config.get("watchlist", {})
+        if isinstance(wl, list):
+            if symbol not in wl:
+                return {"status": "error", "message": f"{symbol} not in watchlist"}
+            wl.remove(symbol)
+            config["watchlist"] = wl
+            save_config(config)
+            return {"status": "ok", "watchlist": _get_combined_watchlist()}
+        manual = wl.get("manual_additions", [])
+        if symbol not in manual:
+            if symbol in wl.get("screener_picks", []):
+                return {"status": "error", "message": f"{symbol} is a screener pick — cannot remove manually"}
+            if symbol in wl.get("mandatory", []):
+                return {"status": "error", "message": f"{symbol} is mandatory and cannot be removed"}
+            return {"status": "error", "message": f"{symbol} not in manual list"}
+        manual.remove(symbol)
+        save_config(config)
+        return {"status": "ok", "message": f"{symbol} removed", "watchlist": _get_combined_watchlist()}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/watchlist/add-manual")
+async def add_manual_symbol(symbol: str):
+    try:
+        from strategy.fundamental_screener import FundamentalScreener
+        screener = FundamentalScreener()
+        result   = screener.add_manual_symbol(symbol.upper().strip())
+        # Score immediately so the symbol appears in signals without
+        # waiting up to 30 min for the next scheduler cycle.
+        sym = symbol.upper().strip()
+        try:
+            from data.fetcher import MarketDataFetcher
+            try:
+                price = MarketDataFetcher().get_current_price(sym)["price"]
+            except Exception:
+                price = 0
+
+            scorecard = scorer.score(sym)
+            signal_val = scorecard.get("signal", "HOLD")
+            new_entry = {
+                "symbol":           sym,
+                "price":            round(price, 4),
+                "signal":           signal_val,
+                "label":            signal_val,
+                "signal_label":     signal_val,
+                "overall_display":  scorecard.get("overall_display", "?"),
+                "normalised_score": scorecard.get("normalised_score", 0),
+                "conviction":       scorecard.get("conviction", ""),
+                "bundle_name":      scorecard.get("bundle_name", ""),
+                "bundle_emoji":     scorecard.get("bundle_emoji", ""),
+                "position_pct":     scorecard.get("position_pct", 0),
+                "trade_id":         scorecard.get("trade_id", ""),
+                "asset_class":      scorecard.get("bundle_id", ""),
+                "cooldown":         False,
+                "timestamp":        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+
+            # Patch latest_signals.json — replace existing entry or append
+            signals_path = os.path.join(
+                os.path.dirname(__file__), '..', 'logs', 'latest_signals.json'
+            )
+            signals = []
+            if os.path.exists(signals_path):
+                try:
+                    with open(signals_path) as f:
+                        signals = json.load(f)
+                    if not isinstance(signals, list):
+                        signals = []
+                except Exception:
+                    signals = []
+
+            signals = [s for s in signals if s.get("symbol") != sym]
+            signals.append(new_entry)
+            os.makedirs(os.path.dirname(signals_path), exist_ok=True)
+            with open(signals_path, "w") as f:
+                json.dump(signals, f, indent=2)
+
+            # Persist to DB
+            try:
+                from database import get_db
+                get_db().save_signals_batch([new_entry])
+            except Exception:
+                pass
+
+        except Exception:
+            pass  # scoring failure is non-fatal — symbol is still saved
+
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.delete("/api/watchlist/remove-manual")
+async def remove_manual_symbol(symbol: str):
+    try:
+        from strategy.fundamental_screener import FundamentalScreener
+        screener = FundamentalScreener()
+        result   = screener.remove_manual_symbol(symbol.upper().strip())
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Screen endpoints ──────────────────────────────────────────
+
+@app.get("/api/screen/status")
+async def get_screen_status():
+    try:
+        from strategy.fundamental_screener import FundamentalScreener
+        screener = FundamentalScreener()
+        results  = screener.get_last_results()
+        config   = load_config()
+        settings = config.get("screen_settings", {})
+        wl       = config.get("watchlist", {})
+        return {
+            "status": "ok",
+            "data": {
+                "last_run":       settings.get("last_screened"),
+                "screen_running": settings.get("screen_running", False),
+                "screener_picks": len(wl.get("screener_picks", []) if isinstance(wl, dict) else []),
+                "last_results":   results,
+                "settings":       settings,
+            }
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/screen/run")
+async def trigger_screen():
+    try:
+        config   = load_config()
+        settings = config.setdefault("screen_settings", {})
+        if settings.get("screen_running"):
+            return {"status": "ok", "message": "Screen already running"}
+        settings["screen_running"] = True
+        save_config(config)
+
+        def run_screen_thread():
+            try:
+                from strategy.fundamental_screener import FundamentalScreener
+                screener = FundamentalScreener()
+                screener.run_screen(save_results=True)
+            except Exception as e:
+                print(f"Screen thread error: {e}")
+            finally:
+                try:
+                    cfg = load_config()
+                    cfg.setdefault("screen_settings", {})["screen_running"] = False
+                    save_config(cfg)
+                except Exception:
+                    pass
+
+        threading.Thread(target=run_screen_thread, daemon=True).start()
+        return {"status": "ok", "message": "Screen started in background."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Portfolio ─────────────────────────────────────────────────
+
+portfolio = {"cash": 10000.0, "positions": {}, "trades": []}
+
+
+@app.get("/api/portfolio")
+def get_portfolio():
+    try:
+        from server.alpaca_trader import AlpacaTrader
+        trader  = AlpacaTrader()
+        account = trader.get_account()
+
+        cash            = account.get("cash", 0.0)
+        total_value     = account.get("portfolio_value", cash)
+        buying_power    = account.get("buying_power", 0.0)
+        from strategy.config_loader import get_settings as _gs
+        initial_capital = float(_gs().get("initial_capital_usd", 100_000.0))
+
+        # positions from Alpaca
+        positions_data = []
+        for p in trader.get_positions():
+            cost_basis = p["qty"] * p["avg_entry"]
+            pnl_pct    = round(float(p["unrealized_plpc"]) * 100, 2)
+            positions_data.append({
+                "symbol":        p["symbol"],
+                "shares":        round(p["qty"], 6),
+                "avg_price":     round(p["avg_entry"], 4),
+                "current_price": round(p["current_price"], 4),
+                "value":         round(p["market_value"], 2),
+                "cost_basis":    round(cost_basis, 2),
+                "pnl":           round(p["unrealized_pl"], 2),
+                "pnl_pct":       pnl_pct,
+            })
+
+        # recent orders as trade history
+        orders = trader.get_orders(limit=10)
+        trades = [
+            {
+                "symbol":    o["symbol"],
+                "action":    o["side"].upper(),
+                "shares":    round(o["filled_qty"], 6),
+                "price":     round(o["filled_price"], 4),
+                "value":     round(o["filled_qty"] * o["filled_price"], 2),
+                "status":    o["status"],
+                "timestamp": o["created_at"],
+            }
+            for o in orders if o.get("filled_qty", 0) > 0
+        ]
+
+        total_pnl     = round(total_value - initial_capital, 2)
+        total_pnl_pct = round((total_pnl / initial_capital) * 100, 2)
+
+        return {
+            "status": "ok",
+            "source": "alpaca",
+            "data": {
+                "cash":          round(cash, 2),
+                "buying_power":  round(buying_power, 2),
+                "total_value":   round(total_value, 2),
+                "total_pnl":     total_pnl,
+                "total_pnl_pct": total_pnl_pct,
+                "positions":     positions_data,
+                "trade_count":   len(trades),
+                "trades":        trades,
+            }
+        }
+    except Exception as e:
+        # fallback to in-memory portfolio if Alpaca unavailable
+        total_value    = portfolio["cash"]
+        positions_data = []
+        for symbol, position in portfolio["positions"].items():
+            try:
+                price      = fetcher.get_current_price(symbol)["price"]
+                value      = position["shares"] * price
+                cost_basis = position["shares"] * position["avg_price"]
+                pnl        = value - cost_basis
+                pnl_pct    = round((pnl / cost_basis) * 100, 2)
+                total_value += value
+                positions_data.append({
+                    "symbol": symbol, "shares": round(position["shares"], 6),
+                    "avg_price": round(position["avg_price"], 4),
+                    "current_price": round(price, 4),
+                    "value": round(value, 2), "pnl": round(pnl, 2), "pnl_pct": pnl_pct,
+                })
+            except Exception:
+                positions_data.append({"symbol": symbol, "error": "price unavailable"})
+        total_pnl     = round(total_value - 10000.0, 2)
+        total_pnl_pct = round((total_pnl / 10000.0) * 100, 2)
+        return {
+            "status": "ok",
+            "source": "fallback",
+            "alpaca_error": str(e),
+            "data": {
+                "cash":          round(portfolio["cash"], 2),
+                "total_value":   round(total_value, 2),
+                "total_pnl":     total_pnl,
+                "total_pnl_pct": total_pnl_pct,
+                "positions":     positions_data,
+                "trade_count":   len(portfolio["trades"]),
+                "trades":        portfolio["trades"][-10:],
+            }
+        }
+
+
+@app.get("/api/portfolio/history")
+def get_portfolio_history():
+    try:
+        from database import get_db
+        curve = get_db().get_equity_curve(days=365)
+
+        if curve:
+            from strategy.config_loader import get_settings as _gs
+            initial = float(_gs().get("initial_capital_usd", 100_000.0))
+            labels  = [p["date"] for p in curve]
+            values  = [round(p["value"], 2) for p in curve]
+            return {
+                "status": "ok",
+                "source": "database",
+                "data": {
+                    "labels":          labels,
+                    "values":          values,
+                    "initial_capital": initial,
+                    "final_value":     values[-1] if values else initial,
+                    "return_pct":      round(
+                        (values[-1] - initial) / initial * 100, 2
+                    ) if values else 0,
+                }
+            }
+
+        # no DB data yet — return empty chart with today's Alpaca value
+        try:
+            from server.alpaca_trader import AlpacaTrader
+            account   = AlpacaTrader().get_account()
+            today_val = account.get("portfolio_value", 100_000.0)
+            today     = datetime.now().strftime("%Y-%m-%d")
+            return {
+                "status": "ok",
+                "source": "alpaca_today",
+                "data": {
+                    "labels":          [today],
+                    "values":          [round(today_val, 2)],
+                    "initial_capital": 100_000.0,
+                    "final_value":     round(today_val, 2),
+                    "return_pct":      round(
+                        (today_val - 100_000.0) / 100_000.0 * 100, 2
+                    ),
+                }
+            }
+        except Exception:
+            return {
+                "status": "ok",
+                "source": "empty",
+                "data": {
+                    "labels": [], "values": [],
+                    "initial_capital": 100_000.0,
+                    "final_value": 100_000.0, "return_pct": 0,
+                }
+            }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/portfolio/trade")
+def execute_trade(symbol: str, action: str, shares: float):
+    try:
+        price  = fetcher.get_current_price(symbol)["price"]
+        action = action.upper()
+        pnl    = 0
+        if action == "BUY":
+            cost = shares * price
+            if cost > portfolio["cash"]:
+                return {"status": "error", "message": "Insufficient cash"}
+            portfolio["cash"] -= cost
+            if symbol in portfolio["positions"]:
+                ex = portfolio["positions"][symbol]
+                total_shares = ex["shares"] + shares
+                total_cost   = (ex["shares"] * ex["avg_price"]) + cost
+                portfolio["positions"][symbol] = {
+                    "shares": total_shares, "avg_price": total_cost / total_shares,
+                }
+            else:
+                portfolio["positions"][symbol] = {"shares": shares, "avg_price": price}
+        elif action == "SELL":
+            if symbol not in portfolio["positions"]:
+                return {"status": "error", "message": f"No position in {symbol}"}
+            position = portfolio["positions"][symbol]
+            if shares > position["shares"]:
+                return {"status": "error", "message": "Insufficient shares"}
+            proceeds = shares * price
+            portfolio["cash"] += proceeds
+            pnl = proceeds - (shares * position["avg_price"])
+            position["shares"] -= shares
+            if position["shares"] <= 0:
+                del portfolio["positions"][symbol]
+        trade = {
+            "symbol": symbol, "action": action, "shares": round(shares, 6),
+            "price": round(price, 4), "value": round(shares * price, 2),
+            "pnl": round(pnl, 2), "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        portfolio["trades"].append(trade)
+        return {"status": "ok", "data": trade}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Scorecard endpoints ───────────────────────────────────────
+
+@app.get("/api/score/{symbol}")
+def get_score(symbol: str):
+    try:
+        symbol = symbol.upper().strip()
+        sc     = scorer.score(symbol)
+        return {"status": "ok", "data": scorer.format_scorecard_dashboard(sc)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/backtest/{symbol}")
+def run_clean_backtest(symbol: str,
+                       period: str = "3y",
+                       mode:   str = "single"):
+    """
+    Runs a clean point-in-time backtest — no lookahead bias.
+    mode: "single" (in-sample) or "walk_forward" (out-of-sample)
+    """
+    try:
+        symbol = symbol.upper().strip()
+        from strategy.clean_backtester import CleanBacktester
+        bt      = CleanBacktester(initial_capital=10_000.0)
+        results = (
+            bt.run_walk_forward(symbol)
+            if mode == "walk_forward"
+            else bt.run(symbol, period=period, verbose=False)
+        )
+        return {
+            "status": "ok",
+            "data": {
+                "symbol":                results.get("symbol"),
+                "period":                results.get("period"),
+                "total_return_pct":      results.get("total_return_pct"),
+                "win_rate":              results.get("win_rate"),
+                "profit_factor":         results.get("profit_factor"),
+                "max_drawdown":          results.get("max_drawdown"),
+                "sharpe_ratio":          results.get("sharpe_ratio"),
+                "total_trades":          results.get("total_trades"),
+                "buy_hold_return":       results.get("buy_hold_return"),
+                "outperformance":        results.get("outperformance"),
+                "valid_for_performance": True,
+                "fill_method":           results.get("fill_method"),
+                "signal_method":         results.get("signal_method"),
+                "windows":               results.get("windows", []),
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/scores")
+def get_all_scores():
+    try:
+        config    = load_config()
+        watchlist = _get_combined_watchlist(config)
+
+        def score_symbol(sym):
+            try:
+                sc = scorer.score(sym)
+                return scorer.format_scorecard_dashboard(sc)
+            except Exception as e:
+                return {"symbol": sym, "error": str(e), "signal": "ERROR"}
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            results = list(executor.map(score_symbol, watchlist))
+        return {"status": "ok", "data": results}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Trade state endpoints ─────────────────────────────────────
+
+@app.get("/api/trades/last")
+def get_last_trades():
+    try:
+        summary = trade_state.get_summary()
+        return {"status": "ok", "data": summary}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/trades/last/{symbol}")
+def get_last_trade(symbol: str):
+    try:
+        symbol = symbol.upper().strip()
+        state  = trade_state.get_last_trade(symbol)
+        if not state:
+            return {"status": "ok", "data": None, "message": f"No trade history for {symbol}"}
+        try:
+            price   = fetcher.get_current_price(symbol)["price"]
+            reentry = trade_state.can_reenter(symbol, price)
+        except Exception:
+            reentry = {"can_enter": None, "reason": "Price unavailable"}
+        return {
+            "status": "ok",
+            "data": {**state, "reentry_gate": reentry,
+                     "cooldown_hours": trade_state.get_cooldown_remaining(symbol)}
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/trades/summary")
+def get_trades_summary():
+    try:
+        all_trades       = trade_state.get_all_last_trades()
+        in_cooldown      = [sym for sym in all_trades if trade_state.is_in_cooldown(sym)]
+        active_positions = [sym for sym, state in all_trades.items()
+                            if state.get("last_action") == "BUY"]
+        return {
+            "status": "ok",
+            "data": {
+                "total_tracked": len(all_trades),
+                "in_cooldown": len(in_cooldown),
+                "cooldown_symbols": in_cooldown,
+                "active_positions": active_positions,
+                "summary": trade_state.get_summary(),
+            }
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/trades/save")
+def save_trade_state(symbol: str, action: str, price: float,
+                     trade_id: str, exit_type: str = None, entry_price: float = None):
+    try:
+        symbol = symbol.upper().strip()
+        record = trade_state.save_trade(
+            symbol=symbol, action=action.upper(), price=price,
+            trade_id=trade_id, exit_type=exit_type, entry_price=entry_price,
+        )
+        return {"status": "ok", "data": record}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.delete("/api/trades/cooldown/{symbol}")
+def clear_cooldown(symbol: str):
+    try:
+        symbol = symbol.upper().strip()
+        state  = trade_state.get_last_trade(symbol)
+        if not state:
+            return {"status": "error", "message": f"No trade state for {symbol}"}
+        state["cooldown_until"] = None
+        trade_state._state[symbol] = state
+        trade_state._save()
+        return {"status": "ok", "message": f"Cooldown cleared for {symbol}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Config ────────────────────────────────────────────────────
+
+@app.get("/api/config")
+def get_config():
+    config = load_config()
+    return {"status": "ok", "data": config}
+
+
+# ── Performance Analytics ─────────────────────────────────────
+
+@app.get("/api/performance")
+def get_performance():
+    try:
+        from database import get_db
+        db      = get_db()
+        summary = db.get_performance_summary()
+        bundles = db.get_bundle_performance()
+        return {"status": "ok", "data": {**summary, "bundles": bundles}}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Cache health (CACHE-1) ────────────────────────────────────
+
+@app.get("/api/health/cache")
+def get_cache_health():
+    """Returns per-layer cache age and expiry status."""
+    try:
+        from data.cache_manager import get_cache
+        import os
+        cm  = get_cache()
+        wl  = _get_combined_watchlist()[:5]
+        result = {"global_layers": {}, "symbol_sample": {}}
+        for layer in ["macro_regime", "intermarket", "breadth"]:
+            result["global_layers"][layer] = {
+                "age_hours": round(cm.get_age_hours(layer), 1),
+                "expired":   cm.is_expired(layer),
+            }
+        for sym in wl:
+            result["symbol_sample"][sym] = {}
+            for layer in ["fundamental", "news", "insider"]:
+                result["symbol_sample"][sym][layer] = {
+                    "age_hours": round(cm.get_age_hours(layer, sym), 1),
+                    "expired":   cm.is_expired(layer, sym),
+                }
+        cache_dir = os.path.join(
+            os.path.dirname(__file__), '..', 'logs', 'cache'
+        )
+        result["total_cache_files"] = (
+            len(os.listdir(cache_dir))
+            if os.path.exists(cache_dir) else 0
+        )
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Scheduler health ──────────────────────────────────────────
+
+@app.get("/api/health/websocket")
+def get_websocket_health():
+    """Returns Alpaca WebSocket connection status."""
+    try:
+        from data.price_stream import get_price_stream
+        return {"status": "ok", "data": get_price_stream().is_connected()}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/health/scheduler")
+def get_scheduler_health():
+    """
+    Returns per-job health state populated by the _guarded()
+    wrapper in scheduler.py. If the scheduler thread hasn't run
+    a job yet, that job won't appear in the dict.
+    """
+    try:
+        import time as _time
+        from server.scheduler import _JOB_HEALTH, _last_full_cycle
+        failed    = [
+            name for name, h in _JOB_HEALTH.items()
+            if h.get("last_status") == "error"
+        ]
+        cycle_ago = round(_time.monotonic() - _last_full_cycle, 1)
+        return {
+            "status": "ok",
+            "data": {
+                "jobs":                     _JOB_HEALTH,
+                "failed_jobs":              failed,
+                "healthy":                  len(failed) == 0,
+                "last_full_cycle_ago_seconds": cycle_ago,
+                "stale":                    cycle_ago > 2700,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Kill Switch ───────────────────────────────────────────────
+
+@app.get("/api/kill-switch/status")
+def get_kill_switch_status():
+    try:
+        from server.kill_switch import get_kill_switch_api, DailyLossGuard
+        data = get_kill_switch_api()
+        data["daily_loss"] = DailyLossGuard().get_status()
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/kill-switch/activate")
+def activate_kill_switch(reason: str = "dashboard"):
+    try:
+        from server.kill_switch import activate_kill_switch_api
+        return {"status": "ok", "data": activate_kill_switch_api(reason)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/kill-switch/deactivate")
+def deactivate_kill_switch(reason: str = "dashboard"):
+    try:
+        from server.kill_switch import deactivate_kill_switch_api
+        return {"status": "ok", "data": deactivate_kill_switch_api(reason)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/trading-mode")
+def set_trading_mode(mode: str, confirm_code: str = None):
+    try:
+        from server.kill_switch import set_trading_mode_api
+        return {"status": "ok", "data": set_trading_mode_api(mode, confirm_code)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Order Locks ───────────────────────────────────────────────
+
+@app.get("/api/orders/locks")
+def get_order_locks():
+    try:
+        from server.order_manager import OrderManager
+        return {"status": "ok", "data": OrderManager().get_lock_status()}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── BACKTEST-1: Three input modes ─────────────────────────────
+
+@app.post("/api/backtest/run")
+def backtest_run(body: dict):
+    """
+    MODE A: any symbol, returns single backtest result.
+    Body: {"symbol": "TSLA", "period": "1y", "mode": "single"}
+    """
+    try:
+        symbol = str(body.get("symbol", "")).upper().strip()
+        period = str(body.get("period", "2y"))
+        mode   = str(body.get("mode", "single"))
+        if not symbol:
+            return {"status": "error", "message": "symbol is required"}
+        from strategy.clean_backtester import CleanBacktester
+        bt     = CleanBacktester(initial_capital=10_000.0)
+        result = bt.run_any_symbol(symbol, period=period, mode=mode)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/backtest/run_file")
+def backtest_run_file(body: dict):
+    """
+    MODE B: batch from file.
+    Body: {"symbols_file": "backtest_symbols.txt", "period": "2y"}
+    """
+    try:
+        symbols_file = str(body.get("symbols_file", "backtest_symbols.txt"))
+        period       = str(body.get("period", "2y"))
+        from strategy.clean_backtester import CleanBacktester
+        bt     = CleanBacktester(initial_capital=10_000.0)
+        result = bt.run_from_file(symbols_file=symbols_file, period=period)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/backtest/scan")
+def backtest_scan(body: dict):
+    """
+    MODE C: scan entire watchlist.
+    Body: {"period": "6mo"}
+    """
+    try:
+        period = str(body.get("period", "6mo"))
+        from strategy.clean_backtester import CleanBacktester
+        bt     = CleanBacktester(initial_capital=10_000.0)
+        result = bt.run_scan(period=period)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── LEDGER-1: Trade decision ledger ───────────────────────────
+
+@app.get("/api/ledger/open")
+def ledger_open():
+    """All open trades with entry context."""
+    try:
+        from database import get_db, TradeLedger
+        db   = get_db()
+        rows = db._get_session().__enter__().query(TradeLedger).filter(
+            TradeLedger.exit_date.is_(None)
+        ).order_by(TradeLedger.entry_date.desc()).all()
+        return {"status": "ok", "data": [
+            {
+                "trade_id":    r.trade_id,
+                "symbol":      r.symbol,
+                "entry_date":  str(r.entry_date),
+                "entry_price": r.entry_price,
+                "setup_type":  r.setup_type,
+                "regime":      r.regime_entry,
+                "basket_score":r.basket_score_entry,
+                "tier":        r.tier,
+            }
+            for r in rows
+        ]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/ledger/closed")
+def ledger_closed(days: int = 90):
+    """Closed trades in descending time order."""
+    try:
+        from database import get_db, TradeLedger
+        from datetime import timedelta
+        db     = get_db()
+        cutoff = datetime.now() - timedelta(days=days)
+        rows   = db._get_session().__enter__().query(TradeLedger).filter(
+            TradeLedger.exit_date >= cutoff
+        ).order_by(TradeLedger.exit_date.desc()).all()
+        return {"status": "ok", "data": [
+            {
+                "trade_id":   r.trade_id,
+                "symbol":     r.symbol,
+                "entry_date": str(r.entry_date),
+                "exit_date":  str(r.exit_date),
+                "entry_price":r.entry_price,
+                "exit_price": r.exit_price,
+                "return_pct": r.return_pct,
+                "days_held":  r.days_held,
+                "exit_reason":r.exit_reason,
+                "setup_type": r.setup_type,
+            }
+            for r in rows
+        ]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/ledger/{symbol}")
+def ledger_symbol(symbol: str):
+    """All trades for one symbol (newest first)."""
+    try:
+        from database import get_db, TradeLedger
+        db   = get_db()
+        rows = db._get_session().__enter__().query(TradeLedger).filter(
+            TradeLedger.symbol == symbol.upper()
+        ).order_by(TradeLedger.entry_date.desc()).all()
+        return {"status": "ok", "symbol": symbol.upper(), "data": [
+            {
+                "trade_id":    r.trade_id,
+                "entry_date":  str(r.entry_date),
+                "entry_price": r.entry_price,
+                "exit_date":   str(r.exit_date) if r.exit_date else None,
+                "exit_price":  r.exit_price,
+                "return_pct":  r.return_pct,
+                "days_held":   r.days_held,
+                "setup_type":  r.setup_type,
+                "exit_reason": r.exit_reason,
+                "basket_score":r.basket_score_entry,
+                "regime":      r.regime_entry,
+            }
+            for r in rows
+        ]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/ledger/summary")
+def ledger_summary():
+    """Performance stats broken down by setup_type."""
+    try:
+        from database import get_db, TradeLedger
+        db   = get_db()
+        rows = db._get_session().__enter__().query(TradeLedger).filter(
+            TradeLedger.exit_date.isnot(None)
+        ).all()
+        by_setup: dict = {}
+        for r in rows:
+            st = r.setup_type or "UNKNOWN"
+            if st not in by_setup:
+                by_setup[st] = {"trades": 0, "wins": 0, "total_return": 0.0}
+            by_setup[st]["trades"]       += 1
+            by_setup[st]["total_return"] += r.return_pct or 0.0
+            if (r.return_pct or 0) > 0:
+                by_setup[st]["wins"] += 1
+        summary = {}
+        for st, d in by_setup.items():
+            n = d["trades"]
+            summary[st] = {
+                "trades":     n,
+                "win_rate":   round(d["wins"] / n * 100, 1) if n else 0,
+                "avg_return": round(d["total_return"] / n, 2) if n else 0,
+            }
+        total = len(rows)
+        wins  = sum(1 for r in rows if (r.return_pct or 0) > 0)
+        return {
+            "status":       "ok",
+            "total_trades": total,
+            "win_rate":     round(wins / total * 100, 1) if total else 0,
+            "by_setup":     summary,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── PERF-1: Performance reporting ─────────────────────────────
+
+@app.get("/api/performance/summary")
+def performance_summary(days: int = 30):
+    """Full performance stats for the last N days."""
+    try:
+        from strategy.performance_calculator import calculate_performance
+        return {"status": "ok", "data": calculate_performance(days)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/performance/by_setup")
+def performance_by_setup(days: int = 30):
+    """Performance breakdown by setup type."""
+    try:
+        from strategy.performance_calculator import calculate_performance
+        stats = calculate_performance(days)
+        return {
+            "status":       "ok",
+            "days":         days,
+            "by_setup_type":stats["by_setup_type"],
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/performance/by_symbol")
+def performance_by_symbol(days: int = 30):
+    """Return % per closed trade grouped by symbol."""
+    try:
+        from database import get_db, TradeLedger
+        from datetime import timedelta
+        db     = get_db()
+        cutoff = datetime.now() - timedelta(days=days)
+        rows   = db._get_session().__enter__().query(TradeLedger).filter(
+            TradeLedger.exit_date >= cutoff,
+            TradeLedger.exit_date.isnot(None),
+        ).all()
+        by_sym: dict = {}
+        for r in rows:
+            s = r.symbol
+            if s not in by_sym:
+                by_sym[s] = {"trades": 0, "total_return": 0.0, "wins": 0}
+            by_sym[s]["trades"]       += 1
+            by_sym[s]["total_return"] += float(r.return_pct or 0)
+            if (r.return_pct or 0) > 0:
+                by_sym[s]["wins"] += 1
+        summary = {
+            s: {
+                "trades":     d["trades"],
+                "avg_return": round(d["total_return"] / d["trades"], 2),
+                "win_rate":   round(d["wins"] / d["trades"] * 100, 1),
+            }
+            for s, d in by_sym.items()
+        }
+        return {"status": "ok", "days": days, "by_symbol": summary}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/performance/daily")
+def performance_daily(days: int = 30):
+    """Stored PerformanceSummary snapshots for the last N days."""
+    try:
+        from database import get_db, PerformanceSummary
+        from datetime import timedelta
+        db     = get_db()
+        cutoff = datetime.now() - timedelta(days=days)
+        rows   = db._get_session().__enter__().query(PerformanceSummary).filter(
+            PerformanceSummary.period_end >= cutoff
+        ).order_by(PerformanceSummary.period_end.desc()).all()
+        return {"status": "ok", "data": [
+            {
+                "period_end":      str(r.period_end)[:10],
+                "total_trades":    r.total_trades,
+                "win_rate":        r.win_rate,
+                "avg_return_pct":  r.avg_return_pct,
+                "sharpe_ratio":    r.sharpe_ratio,
+                "max_drawdown_pct":r.max_drawdown_pct,
+            }
+            for r in rows
+        ]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── Dashboard ─────────────────────────────────────────────────
+
+@app.get("/dashboard")
+def serve_dashboard():
+    return FileResponse("dashboard/index.html")
