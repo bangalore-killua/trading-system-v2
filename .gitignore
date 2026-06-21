@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment secrets — never commit
+.env
+
+# Database
+*.db
+*.sqlite3
+
+# Logs and runtime artifacts
+logs/
+*.log
+
+# ML model artifacts (large binaries)
+models/*.pkl
+models/*.joblib
+models/*.lgb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# SpaCy model downloads (re-download via setup)
+en_core_web_sm/
