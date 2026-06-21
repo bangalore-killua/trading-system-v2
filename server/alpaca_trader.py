@@ -264,6 +264,100 @@ class AlpacaTrader:
         self._client.close_all_positions(cancel_orders=True)
         logger.warning("ALL POSITIONS CLOSED via kill_switch")
 
+    # ── Options order methods ────────────────────────────────────────────────
+
+    def place_option_order(
+        self,
+        contract_symbol: str,
+        side: str,
+        qty: int,
+    ) -> "OrderFill":
+        """Submit a market option order and block until terminal state.
+
+        Args:
+            contract_symbol: OCC symbol e.g. "AAPL240119C00185000"
+            side: "buy" or "sell" (sell = write/short for covered calls)
+            qty: number of contracts
+
+        Returns:
+            OrderFill. filled_avg_price is per-share (divide by 100 for contract value).
+        """
+        from alpaca.trading.requests import MarketOrderRequest  # type: ignore
+        from alpaca.trading.enums import OrderSide, TimeInForce  # type: ignore
+
+        order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
+
+        request = MarketOrderRequest(
+            symbol=contract_symbol,
+            qty=str(qty),
+            side=order_side,
+            time_in_force=TimeInForce.DAY,
+            type="market",
+        )
+
+        logger.info(
+            "OPTION ORDER SUBMIT: %s %s qty=%d contracts", side.upper(), contract_symbol, qty
+        )
+
+        try:
+            order = self._client.submit_order(order_data=request)
+        except Exception as exc:
+            logger.error("OPTION ORDER FAILED (submit): %s %s — %s", side.upper(), contract_symbol, exc)
+            return OrderFill(
+                order_id="failed",
+                symbol=contract_symbol,
+                side=side,
+                qty=qty,
+                filled_qty=0,
+                filled_avg_price=0,
+                status="rejected",
+            )
+
+        return self._wait_for_fill(order.id, contract_symbol, side, qty)
+
+    def get_option_positions(self) -> list:
+        """Return all open option positions (AssetClass = us_option)."""
+        try:
+            from alpaca.trading.requests import GetAllPositionsRequest  # type: ignore
+            from alpaca.trading.enums import AssetClass  # type: ignore
+            all_positions = self._client.get_all_positions()
+            return [
+                p for p in all_positions
+                if str(getattr(p, "asset_class", "")).lower() in ("us_option", "option")
+            ]
+        except Exception:
+            logger.exception("Failed to fetch option positions")
+            return []
+
+    def get_option_snapshot(self, contract_symbol: str) -> Optional[dict]:
+        """Fetch latest quote for a single option contract via historical data client.
+
+        Returns dict with bid, ask, mid, delta, theta or None on failure.
+        """
+        try:
+            from alpaca.data.historical.option import OptionHistoricalDataClient  # type: ignore
+            from alpaca.data.requests import OptionLatestQuoteRequest  # type: ignore
+
+            client = OptionHistoricalDataClient(
+                api_key=self._client._api_key,  # re-use same credentials
+                secret_key=self._client._secret_key,
+            )
+            req = OptionLatestQuoteRequest(symbol_or_symbols=[contract_symbol])
+            quotes = client.get_option_latest_quote(req)
+
+            quote = quotes.get(contract_symbol)
+            if not quote:
+                return None
+
+            bid = float(getattr(quote, "bid_price", 0) or 0)
+            ask = float(getattr(quote, "ask_price", 0) or 0)
+            mid = round((bid + ask) / 2, 4) if (bid > 0 and ask > 0) else 0.0
+            return {"bid": bid, "ask": ask, "mid": mid}
+
+        except Exception:
+            logger.debug("Option snapshot failed for %s", contract_symbol)
+            return None
+
     def calculate_position_size(
         self,
         symbol: str,

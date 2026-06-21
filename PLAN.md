@@ -21,8 +21,8 @@ pipeline, properly wired signal basket, and real-time discovery via WebSocket + 
 |-------|--------|-------|
 | Phase 1 — Foundation | ✅ Complete | Merged to main via PR |
 | Phase 2 — YOLOv8 + Feature Vector | ✅ Complete | Branch: feat/phase-2-yolov8-patterns |
-| Phase 3 — LightGBM Meta-Model | 🔨 In Progress | Branch: feat/phase-3-lightgbm |
-| Phase 4 — Options expansion | ⏳ Not started | Needs Phase 3 |
+| Phase 3 — LightGBM Meta-Model | ✅ Complete | Merged to main via PR |
+| Phase 4 — Options expansion | 🔨 In Progress | Branch: feat/phase-4-options |
 
 ### Files Status (update this as work progresses)
 
@@ -93,8 +93,27 @@ Additional files added to complete Phase 1:
 - ✅ `run_server.py` — MetaModel auto-loaded at startup; TrainingPipeline wired to scheduler
 - ✅ `config.json` — `lgbm_params`, `walk_forward_splits`, retrain schedule, `chart_pattern_model_path`
 
-**How to start Phase 4 in a new session:**
-> "We are building trading-system-v2 at `C:\Users\ASUS\git_repos\trading-system-v2`. Phases 1, 2, and 3 are complete. Phase 3 is on branch `feat/phase-3-lightgbm` — read PLAN.md. Phase 4 is options expansion via alpaca-py OptionDataStream. After merging Phase 3 PR, create branch `feat/phase-4-options` off main."
+---
+
+#### IN PROGRESS — Phase 4 (branch: feat/phase-4-options)
+
+**Files written:**
+- ✅ `data/options_chain.py` — `OptionsChainFetcher`: Alpaca option chain snapshots, delta/DTE/OI filter, 5-min cache
+- ✅ `strategy/options_selector.py` — `OptionsSelector`: selects ATM call, OTM put, or OTM covered-call contract
+- ✅ `server/option_stream.py` — `OptionDataStreamManager`: WebSocket quotes for open option positions
+- ✅ Tests: `test_options_chain.py`, `test_options_selector.py`
+
+**Files extended:**
+- ✅ `server/alpaca_trader.py` — `place_option_order()`, `get_option_positions()`, `get_option_snapshot()`
+- ✅ `database.py` — `OptionPosition` table + `open_option_position()`, `close_option_position()`, `get_open_option_positions()`
+- ✅ `strategy/position_manager.py` — `_try_long_call()`, `monitor_option_exits()`, `evaluate_protective_put()`; options stream injected
+- ✅ `server/scheduler.py` — 15-min options monitoring job (only when options.enabled=true); option_stream start/stop
+- ✅ `run_server.py` — `OptionsChainFetcher`, `OptionsSelector`, `OptionDataStreamManager` wired; options injected into position_manager
+- ✅ `config.json` — full `options` block (all params, disabled by default)
+- ✅ `README.md` — Phase 4 strategies table, enable instructions
+
+**How to resume Phase 4 in a new session:**
+> "We are building trading-system-v2 at `C:\Users\ASUS\git_repos\trading-system-v2`. Phases 1–3 are complete. Phase 4 options expansion is in progress on branch `feat/phase-4-options` — read PLAN.md. The core Phase 4 files are written and wired. Next: commit, push, and open PR."
 
 ---
 

@@ -57,6 +57,7 @@ class TradingScheduler:
         self.regime_detector = None      # RegimeDetector
         self.telegram = None             # TelegramAlerts
         self.training_pipeline = None    # TrainingPipeline (Phase 3)
+        self.options_stream = None       # OptionDataStreamManager (Phase 4)
 
     async def start(self) -> None:
         """Run the full startup sequence then hand off to the scheduler loop."""
@@ -81,6 +82,12 @@ class TradingScheduler:
                 self.tv_screener.start(), name="tv_screener"
             ))
             logger.info("[3/3] TradingView Screener started")
+
+        if self.options_stream and self._cfg.get("options", {}).get("enabled", False):
+            stream_tasks.append(asyncio.create_task(
+                self.options_stream.start(), name="option_data_stream"
+            ))
+            logger.info("[4/4] Option data stream started")
 
         # Phase 2: Register HOT_UNIVERSE callback → triggers immediate entry eval
         if self.hot_universe and self.position_manager:
@@ -110,6 +117,8 @@ class TradingScheduler:
             await self.edgar_monitor.stop()
         if self.tv_screener:
             await self.tv_screener.stop()
+        if self.options_stream:
+            await self.options_stream.stop()
         logger.info("Trading System stopped")
 
     def _register_jobs(self) -> None:
@@ -204,6 +213,20 @@ class TradingScheduler:
             name="Retrain LightGBM meta-model on live trade labels",
         )
 
+        # ── Phase 4: Option position monitoring (every 15 min, only if enabled) ──
+        options_cfg = self._cfg.get("options", {})
+        if options_cfg.get("enabled", False):
+            self._scheduler.add_job(
+                self._monitor_options,
+                trigger=IntervalTrigger(
+                    minutes=options_cfg.get("monitor_interval_minutes", 15)
+                ),
+                id="monitor_options",
+                max_instances=1,
+                misfire_grace_time=120,
+                name="Monitor open option positions for exit signals",
+            )
+
         logger.info("Registered %d scheduler jobs", len(self._scheduler.get_jobs()))
 
     # ── Job implementations ─────────────────────────────────────────────────
@@ -280,6 +303,15 @@ class TradingScheduler:
                 logger.info("Retrain skipped — insufficient labeled samples")
         except Exception:
             logger.exception("Meta-model retrain job failed")
+
+    async def _monitor_options(self) -> None:
+        """Check open option positions for stop-loss, take-profit, and DTE close."""
+        if not self.position_manager:
+            return
+        try:
+            await self.position_manager.monitor_option_exits()
+        except Exception:
+            logger.exception("monitor_options job error")
 
     async def _refresh_screener(self) -> None:
         """Weekly screener picks refresh — updates config watchlist."""

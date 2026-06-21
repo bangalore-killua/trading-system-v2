@@ -200,6 +200,30 @@
       "random_state": 42
     }
   },
+  "options": {
+    "enabled": false,
+    "strategies_enabled": ["long_call", "protective_put"],
+    "max_options_exposure_pct": 10,
+    "monitor_interval_minutes": 15,
+    "min_underlying_volume": 1000000,
+    "min_contract_oi": 500,
+    "max_contract_spread_pct": 0.15,
+    "long_call_min_lgbm_confidence": 0.65,
+    "long_call_target_delta_min": 0.40,
+    "long_call_target_delta_max": 0.60,
+    "long_call_min_dte": 25,
+    "long_call_max_dte": 50,
+    "long_call_budget_pct": 0.5,
+    "protective_put_otm_pct": 7.0,
+    "protective_put_min_dte": 30,
+    "protective_put_max_dte": 60,
+    "covered_call_otm_pct": 7.0,
+    "covered_call_min_dte": 14,
+    "covered_call_max_dte": 21,
+    "stop_loss_pct": 50,
+    "take_profit_pct": 100,
+    "close_dte_threshold": 7
+  },
   "performance": {
     "benchmark": "SPY",
     "report_output_dir": "logs/performance",

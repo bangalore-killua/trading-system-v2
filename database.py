@@ -389,6 +389,43 @@ class PerformanceSummary(Base):
     )
 
 
+# ── OPT-1: Option positions ──────────────────────────────────
+
+class OptionPosition(Base):
+    """Tracks open and closed option legs placed by Phase 4 strategies.
+
+    One row per contract per strategy. Closed when stop-loss, take-profit,
+    DTE threshold, or manual close fires.
+    """
+    __tablename__ = "option_positions"
+
+    id               = Column(Integer,  primary_key=True)
+    underlying       = Column(String(10), nullable=False, index=True)
+    contract_symbol  = Column(String(30), nullable=False, index=True)
+    option_type      = Column(String(4),  nullable=False)   # "call" | "put"
+    strike           = Column(Float,      nullable=False)
+    expiry           = Column(DateTime,   nullable=False)
+    days_to_expiry   = Column(Integer,    nullable=True)
+    strategy         = Column(String(20), nullable=False)   # "long_call" | "protective_put" | "covered_call"
+    qty              = Column(Integer,    nullable=False)
+    entry_premium    = Column(Float,      nullable=False)   # per-share mid at fill time
+    entry_order_id   = Column(String(60), nullable=True)
+    status           = Column(String(10), default="open", index=True)   # open | closed
+    exit_premium     = Column(Float,      nullable=True)
+    exit_reason      = Column(String(30), nullable=True)    # "stop_loss" | "take_profit" | "dte_close" | "manual"
+    exit_order_id    = Column(String(60), nullable=True)
+    pnl              = Column(Float,      nullable=True)    # (exit - entry) × qty × 100
+    pnl_pct          = Column(Float,      nullable=True)
+    opened_at        = Column(DateTime,   nullable=False, default=datetime.utcnow)
+    closed_at        = Column(DateTime,   nullable=True)
+    delta_at_entry   = Column(Float,      nullable=True)
+    iv_at_entry      = Column(Float,      nullable=True)
+
+    __table_args__ = (
+        Index("ix_option_positions_status_underlying", "status", "underlying"),
+    )
+
+
 # ── Database Connection ───────────────────────────────────────
 
 def get_connection_string() -> str:
@@ -1306,6 +1343,106 @@ class TradingDatabase:
         except Exception as e:
             log.error("count_labeled_features failed: %s", e)
             return 0
+
+    # ── Option positions (Phase 4) ────────────────────────────
+
+    def open_option_position(
+        self,
+        underlying: str,
+        contract_symbol: str,
+        option_type: str,
+        strike: float,
+        expiry,
+        days_to_expiry: int,
+        strategy: str,
+        qty: int,
+        entry_premium: float,
+        entry_order_id: Optional[str] = None,
+        delta_at_entry: Optional[float] = None,
+        iv_at_entry: Optional[float] = None,
+    ) -> Optional[int]:
+        """Record a new open option position. Returns the row id."""
+        try:
+            with get_session() as session:
+                row = OptionPosition(
+                    underlying=underlying,
+                    contract_symbol=contract_symbol,
+                    option_type=option_type,
+                    strike=strike,
+                    expiry=expiry,
+                    days_to_expiry=days_to_expiry,
+                    strategy=strategy,
+                    qty=qty,
+                    entry_premium=entry_premium,
+                    entry_order_id=entry_order_id,
+                    delta_at_entry=delta_at_entry,
+                    iv_at_entry=iv_at_entry,
+                    status="open",
+                    opened_at=datetime.utcnow(),
+                )
+                session.add(row)
+                session.flush()
+                return row.id
+        except Exception as e:
+            log.error("open_option_position failed for %s: %s", contract_symbol, e)
+            return None
+
+    def close_option_position(
+        self,
+        contract_symbol: str,
+        exit_premium: float,
+        exit_reason: str,
+        exit_order_id: Optional[str] = None,
+    ) -> bool:
+        """Mark an option position closed and record P&L."""
+        try:
+            with get_session() as session:
+                row = (
+                    session.query(OptionPosition)
+                    .filter(
+                        OptionPosition.contract_symbol == contract_symbol,
+                        OptionPosition.status == "open",
+                    )
+                    .first()
+                )
+                if not row:
+                    log.warning("close_option_position: no open row for %s", contract_symbol)
+                    return False
+
+                pnl_per_share = exit_premium - row.entry_premium
+                # Covered calls: entry was a credit (positive premium received),
+                # pnl = entry_premium (received) - exit_premium (cost to close)
+                if row.strategy == "covered_call":
+                    pnl_per_share = row.entry_premium - exit_premium
+
+                pnl = pnl_per_share * row.qty * 100
+                pnl_pct = (pnl_per_share / row.entry_premium * 100) if row.entry_premium else 0
+
+                row.status = "closed"
+                row.exit_premium = exit_premium
+                row.exit_reason = exit_reason
+                row.exit_order_id = exit_order_id
+                row.pnl = pnl
+                row.pnl_pct = pnl_pct
+                row.closed_at = datetime.utcnow()
+                session.flush()
+                return True
+        except Exception as e:
+            log.error("close_option_position failed for %s: %s", contract_symbol, e)
+            return False
+
+    def get_open_option_positions(self) -> List[Any]:
+        """Return all open option positions."""
+        try:
+            with get_session() as session:
+                return (
+                    session.query(OptionPosition)
+                    .filter(OptionPosition.status == "open")
+                    .all()
+                )
+        except Exception as e:
+            log.error("get_open_option_positions failed: %s", e)
+            return []
 
     # ── Migration ─────────────────────────────────────────────
 
