@@ -56,9 +56,11 @@ class TradingScheduler:
         self.alpaca_trader = None        # AlpacaTrader
         self.regime_detector = None      # RegimeDetector
         self.telegram = None             # TelegramAlerts
-        self.training_pipeline = None    # TrainingPipeline (Phase 3)
-        self.options_stream = None       # OptionDataStreamManager (Phase 4)
-        self._last_regime: str = ""      # tracks regime changes for protective put trigger
+        self.training_pipeline = None      # TrainingPipeline (Phase 3)
+        self.options_stream = None         # OptionDataStreamManager (Phase 4)
+        self.fundamentals_fetcher = None   # FundamentalsFetcher (weekly refresh)
+        self.db = None                     # TradingDatabase (performance report)
+        self._last_regime: str = ""        # tracks regime changes for protective put trigger
 
     async def start(self) -> None:
         """Run the full startup sequence then hand off to the scheduler loop."""
@@ -280,10 +282,37 @@ class TradingScheduler:
             logger.exception("update_regime job error")
 
     async def _refresh_fundamentals(self) -> None:
-        """Weekly fundamental data refresh for all watchlist symbols."""
-        logger.info("Weekly fundamentals refresh starting...")
-        # Placeholder — fundamentals_fetcher will implement this
-        # Called Sunday at 2am so FMP quota resets before market open Monday
+        """Weekly fundamental data refresh for all watchlist symbols.
+
+        Called Sunday at 2am so FMP/EDGAR quota resets before Monday open.
+        Fetches P/E, ROE, revenue growth, debt/equity, mktcap for every
+        watchlist symbol and caches results in FundamentalsFetcher.
+        """
+        if not self.fundamentals_fetcher:
+            logger.debug("fundamentals_fetcher not wired — skipping refresh")
+            return
+
+        watchlist: list = self._cfg.get("watchlist", [])
+        if not watchlist:
+            return
+
+        logger.info("Weekly fundamentals refresh: %d symbols", len(watchlist))
+        success = errors = 0
+        for symbol in watchlist:
+            try:
+                await self.fundamentals_fetcher.fetch(symbol)
+                success += 1
+            except Exception:
+                logger.exception("Fundamentals fetch failed for %s", symbol)
+                errors += 1
+
+        logger.info(
+            "Fundamentals refresh complete: %d ok, %d errors", success, errors
+        )
+        if self.telegram:
+            await self.telegram.send_message(
+                f"Fundamentals refreshed: {success} ok, {errors} errors"
+            )
 
     async def _retrain_meta_model(self) -> None:
         """Sunday 6am: retrain LightGBM on live paper trade labels.
@@ -325,14 +354,92 @@ class TradingScheduler:
             logger.exception("monitor_options job error")
 
     async def _refresh_screener(self) -> None:
-        """Weekly screener picks refresh — updates config watchlist."""
+        """Weekly screener picks refresh — feeds HOT_UNIVERSE with top movers.
+
+        Runs a broader TradingView scan on Sunday at 4am (lower volume_ratio
+        threshold than the 5-min intraday scan) and pushes results into
+        HOT_UNIVERSE so they get evaluated at next market open.
+        """
+        if not self.tv_screener or not self.hot_universe:
+            logger.debug("tv_screener or hot_universe not wired — skipping")
+            return
+
         logger.info("Weekly screener picks refresh starting...")
-        # Placeholder — tv_screener batch run for Sunday maintenance
+        try:
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None, self.tv_screener.run_once_sync
+            )
+            if not results:
+                logger.info("Screener refresh: no results returned")
+                return
+
+            added = 0
+            for item in results:
+                symbol = item.get("symbol", "")
+                if symbol:
+                    self.hot_universe.add(symbol, source="TV_SCREENER_WEEKLY")
+                    added += 1
+
+            logger.info("Screener refresh: %d symbols added to HOT_UNIVERSE", added)
+            if self.telegram:
+                top = [r["symbol"] for r in results[:10]]
+                await self.telegram.send_message(
+                    f"Weekly screener refresh: {added} symbols queued\n"
+                    f"Top picks: {', '.join(top)}"
+                )
+        except Exception:
+            logger.exception("Screener refresh failed")
 
     async def _generate_performance_report(self) -> None:
-        """Generate quantstats HTML report after market close."""
-        logger.info("Generating post-market performance report...")
-        # Placeholder — performance_calculator.py will implement this
+        """Generate daily quantstats HTML tearsheet after market close (4:30pm)."""
+        if not self.db:
+            logger.debug("db not wired — skipping performance report")
+            return
+        try:
+            import os
+            import pandas as pd
+            import quantstats as qs
+            from datetime import date
+
+            curve = self.db.get_equity_curve(days=365)
+            if len(curve) < 2:
+                logger.info("Not enough equity curve data for report (< 2 days)")
+                return
+
+            df = pd.DataFrame(curve)
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.set_index("date").sort_index()
+            returns = df["value"].pct_change().dropna()
+            if returns.empty:
+                return
+
+            os.makedirs("reports", exist_ok=True)
+            report_path = f"reports/performance_{date.today().isoformat()}.html"
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: qs.reports.html(
+                    returns, output=report_path,
+                    title="Trading System v2 Daily Report", quiet=True,
+                ),
+            )
+            logger.info("Performance report saved: %s", report_path)
+
+            if self.telegram:
+                cagr   = qs.stats.cagr(returns)
+                sharpe = qs.stats.sharpe(returns)
+                max_dd = qs.stats.max_drawdown(returns)
+                total  = qs.stats.comp(returns)
+                await self.telegram.send_message(
+                    f"Daily Performance Report\n"
+                    f"Total return : {total:.1%}\n"
+                    f"CAGR         : {cagr:.1%}\n"
+                    f"Sharpe       : {sharpe:.2f}\n"
+                    f"Max drawdown : {max_dd:.1%}"
+                )
+        except Exception:
+            logger.exception("Performance report generation failed")
 
     def _on_hot_symbol(self, symbol: str, source: str) -> None:
         """Callback fired by HOT_UNIVERSE when a new symbol enters.
