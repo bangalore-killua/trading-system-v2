@@ -74,7 +74,7 @@ class TrainingPipeline:
 
         for symbol in symbols:
             try:
-                df = await fetcher.fetch(symbol, bars=bars)
+                df = await fetcher.get_bars(symbol, bars=bars)
                 if df is None or len(df) < 100:
                     logger.warning("Skipping %s — insufficient data", symbol)
                     continue
@@ -287,6 +287,7 @@ async def _cli_main(args):
         print(f"  WF avg P(win) accuracy: {result.get('avg_high_conf_accuracy')}")
     else:
         print("Training skipped — insufficient data or error (see logs)")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

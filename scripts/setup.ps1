@@ -62,12 +62,14 @@ Write-Host "         Prevents 2-4 min delay on the first live news event."
 
 $finbert_script = "$repo\scripts\_tmp_finbert_download.py"
 Set-Content -Path $finbert_script -Encoding utf8 -Value @'
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+# Use snapshot_download — downloads all model files to local cache without
+# loading them into memory. Avoids the Windows multiprocessing spawn error
+# that from_pretrained() triggers when run outside of __main__.
+from huggingface_hub import snapshot_download
 model_name = "yiyanghkust/finbert-tone"
-print("  Downloading", model_name, "...")
-AutoTokenizer.from_pretrained(model_name)
-AutoModelForSequenceClassification.from_pretrained(model_name)
-print("  FinBERT download complete.")
+print("  Caching", model_name, "to HuggingFace local cache...")
+path = snapshot_download(repo_id=model_name)
+print("  FinBERT cached at:", path)
 '@
 
 python $finbert_script
