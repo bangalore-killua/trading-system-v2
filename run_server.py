@@ -265,6 +265,7 @@ async def main() -> None:
     scheduler.regime_detector = regime_detector
     scheduler.telegram = telegram
     scheduler.training_pipeline = training_pipeline      # Phase 3: Sunday retrain job
+    scheduler.meta_model = meta_model                    # Phase 3: hot-reload after retrain
     scheduler.options_stream = options_stream            # Phase 4: option quote stream
     scheduler.fundamentals_fetcher = fundamentals_fetcher  # weekly Sunday refresh
     scheduler.db = db                                    # daily performance report
