@@ -156,13 +156,16 @@ class MetaModel:
         if class_weights:
             sample_weights = y.map({k: class_weights.get(k, 1.0) for k in y.unique()})
 
-        callbacks = [lgb.log_evaluation(period=50), lgb.early_stopping(stopping_rounds=30)]
-
         eval_set_enc = None
         if eval_set:
             X_val, y_val = eval_set
             y_val_enc = y_val.map(LABEL_TO_CLASS)
             eval_set_enc = [(X_val, y_val_enc)]
+
+        # early_stopping requires valid_sets — only add when we have a validation set
+        callbacks = [lgb.log_evaluation(period=50)]
+        if eval_set_enc:
+            callbacks.append(lgb.early_stopping(stopping_rounds=30))
 
         model = lgb.LGBMClassifier(**params)
         model.fit(
