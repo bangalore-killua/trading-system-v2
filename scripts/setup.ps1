@@ -62,14 +62,18 @@ Write-Host "         Prevents 2-4 min delay on the first live news event."
 
 $finbert_script = "$repo\scripts\_tmp_finbert_download.py"
 Set-Content -Path $finbert_script -Encoding utf8 -Value @'
-# Use snapshot_download — downloads all model files to local cache without
-# loading them into memory. Avoids the Windows multiprocessing spawn error
-# that from_pretrained() triggers when run outside of __main__.
-from huggingface_hub import snapshot_download
-model_name = "yiyanghkust/finbert-tone"
-print("  Caching", model_name, "to HuggingFace local cache...")
-path = snapshot_download(repo_id=model_name)
-print("  FinBERT cached at:", path)
+# if __name__ == "__main__" is REQUIRED on Windows.
+# from_pretrained() internally spawns a subprocess for weight loading;
+# without this guard, Python raises RuntimeError about bootstrapping phase.
+if __name__ == "__main__":
+    import os
+    os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    model_name = "yiyanghkust/finbert-tone"
+    print("  Downloading", model_name, "...")
+    AutoTokenizer.from_pretrained(model_name)
+    AutoModelForSequenceClassification.from_pretrained(model_name)
+    print("  FinBERT cached and ready.")
 '@
 
 python $finbert_script
@@ -134,7 +138,12 @@ Write-Host "  via triple-barrier method, trains LightGBM. Takes ~30 minutes."
 Write-Host "  Without it: all trades use full size (no P(win) filter)."
 Write-Host ""
 
-$answer = Read-Host "  Run LightGBM bootstrap now? (y/N)"
+try {
+    $answer = Read-Host "  Run LightGBM bootstrap now? (y/N)"
+} catch {
+    $answer = "N"
+    Write-Host "  (non-interactive shell — skipping prompt, answer: N)" -ForegroundColor Yellow
+}
 if ($answer -match "^[Yy]$") {
     Write-Host "  Starting - do not close this window..." -ForegroundColor Yellow
     python -m strategy.training_pipeline --symbols AAPL MSFT NVDA GOOGL META AMZN TSLA AMD CRM NFLX --years 5
