@@ -66,7 +66,12 @@ class TrainingPipeline:
             sl_multiplier=self._model_cfg.get("triple_barrier_sl_multiplier", 1.5),
             max_holding_days=self._model_cfg.get("triple_barrier_max_days", 10),
         )
-        fetcher = OHLCVFetcher()
+        import os
+        fetcher = OHLCVFetcher(
+            alpaca_api_key=os.environ.get("ALPACA_API_KEY"),
+            alpaca_secret_key=os.environ.get("ALPACA_SECRET_KEY"),
+            alpaca_paper=os.environ.get("ALPACA_PAPER", "true").lower() == "true",
+        )
         scorer = Scorer(config=self._cfg)
 
         bars = int(years * 252)
