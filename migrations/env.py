@@ -1,11 +1,13 @@
 import os
 from logging.config import fileConfig
+from pathlib import Path
 
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 from dotenv import load_dotenv
 
-load_dotenv()
+# Explicitly load .env from the project root (two levels up from migrations/)
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 # Import all ORM models so autogenerate can see them
 from database import (  # noqa: F401
