@@ -1508,6 +1508,60 @@ def performance_daily(days: int = 30):
         return {"status": "error", "message": str(e)}
 
 
+# ── News feed (fincept layer) ─────────────────────────────────
+
+@app.get("/api/news")
+def get_news(hours: int = 24, ticker: str = "", limit: int = 60):
+    """Recent articles from all 39 RSS sources + OpenBB, with FinBERT sentiment."""
+    try:
+        from data.news_aggregator import get_news_aggregator
+        agg = get_news_aggregator()
+        tickers = [t.strip().upper() for t in ticker.split(",") if t.strip()] if ticker else None
+        articles = agg.get_recent_articles(hours=hours, tickers=tickers)[:limit]
+        now = datetime.utcnow()
+        data = []
+        for a in articles:
+            age_s = int((now - a.published_at).total_seconds())
+            age_label = (
+                f"{age_s // 3600}h ago" if age_s >= 3600
+                else f"{age_s // 60}m ago" if age_s >= 60
+                else "just now"
+            )
+            data.append({
+                "title":        a.title,
+                "url":          a.url,
+                "source":       a.source_name,
+                "published_at": a.published_at.isoformat(),
+                "age_label":    age_label,
+                "sentiment":    round(a.sentiment, 3),
+                "threat":       a.threat,
+                "tickers":      a.tickers,
+            })
+        return {"status": "ok", "count": len(data), "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": []}
+
+
+@app.get("/api/regime")
+def get_regime():
+    """Current market regime + macro snapshot."""
+    try:
+        reg = regime_detector.get_current_regime() if regime_detector else None
+        return {
+            "status": "ok",
+            "data": {
+                "regime":       reg.name if reg else "UNKNOWN",
+                "regime_label": str(reg) if reg else "Unknown",
+                "allowed_entry": reg is not None and reg.name in [
+                    "EARLY_BULL", "MID_BULL", "NEUTRAL"
+                ],
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e),
+                "data": {"regime": "UNKNOWN", "allowed_entry": False}}
+
+
 # ── Dashboard ─────────────────────────────────────────────────
 
 @app.get("/dashboard")
