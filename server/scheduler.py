@@ -57,6 +57,7 @@ class TradingScheduler:
         self.regime_detector = None      # RegimeDetector
         self.telegram = None             # TelegramAlerts
         self.training_pipeline = None      # TrainingPipeline (Phase 3)
+        self.meta_model = None             # MetaModel — hot-reloaded after each retrain
         self.options_stream = None         # OptionDataStreamManager (Phase 4)
         self.fundamentals_fetcher = None   # FundamentalsFetcher (weekly refresh)
         self.db = None                     # TradingDatabase (performance report)
@@ -371,6 +372,10 @@ class TradingScheduler:
                     result.get("n_samples", 0),
                     result.get("train_accuracy", 0),
                 )
+                # Hot-reload the in-memory model so scoring uses new weights immediately
+                if self.meta_model is not None:
+                    self.meta_model.load()
+                    logger.info("MetaModel hot-reloaded — new weights active")
                 if self.telegram:
                     await self.telegram.send_message(
                         f"🤖 Meta-model retrained\n"
