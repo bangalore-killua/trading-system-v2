@@ -142,7 +142,7 @@ try {
     $answer = Read-Host "  Run LightGBM bootstrap now? (y/N)"
 } catch {
     $answer = "N"
-    Write-Host "  (non-interactive shell — skipping prompt, answer: N)" -ForegroundColor Yellow
+    Write-Host "  (non-interactive shell - skipping prompt, answer: N)" -ForegroundColor Yellow
 }
 if ($answer -match "^[Yy]$") {
     Write-Host "  Starting - do not close this window..." -ForegroundColor Yellow
