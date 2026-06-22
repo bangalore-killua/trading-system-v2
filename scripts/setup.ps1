@@ -6,18 +6,19 @@
 #
 # Steps:
 #   1. Install pandas-ta (excluded from requirements.txt due to pip memory crash)
-#   2. Pre-download FinBERT model (~400 MB) to avoid delay on first news event
-#   3. Verify spaCy en_core_web_sm is installed
-#   4. Smoke-test tradingview-screener v3.2.1 API compatibility
-#   5. Bootstrap LightGBM (optional, ~30 min)
+#   2. Install TA-Lib (Windows wheel -- needed for 60 candlestick pattern features)
+#   3. Pre-download FinBERT model (~400 MB) to avoid delay on first news event
+#   4. Verify spaCy en_core_web_sm is installed
+#   5. Smoke-test tradingview-screener v3.2.1 API compatibility
+#   6. Bootstrap LightGBM (optional, ~30 min)
 #
 # Going LIVE checklist (manual, not in this script):
-#   [ ] Rotate API keys - Alpaca, Telegram, FMP, NewsAPI were in git history
 #   [ ] Get free OpenBB PAT at https://my.openbb.co - add to .env as OPENBB_PAT=
 #   [ ] .env: ALPACA_PAPER=false + live Alpaca API keys
 #   [ ] config.json: "alpaca": { "paper": false }
 #   [ ] Apply for Alpaca options trading (Level 2) if options.enabled=true
 #   [ ] Set up nightly pg_dump backup via Task Scheduler
+#   [ ] Train YOLOv8 chart pattern model: .\scripts\train_yolov8.ps1
 
 $ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent $PSScriptRoot
@@ -42,7 +43,7 @@ Set-Location $repo
 # Step 1: pandas-ta
 # ────────────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "Step 1/5: Installing pandas-ta 0.4.71b0..." -ForegroundColor Cyan
+Write-Host "Step 1/6: Installing pandas-ta 0.4.71b0..." -ForegroundColor Cyan
 
 uv pip install "pandas-ta==0.4.71b0" --prerelease=allow
 if ($LASTEXITCODE -eq 0) {
@@ -53,11 +54,51 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 # ────────────────────────────────────────────────────────────────────────────
-# Step 2: FinBERT pre-download
+# Step 2: TA-Lib (Windows pre-compiled wheel)
+# pandas-ta delegates all cdl_pattern() calls to TA-Lib. Without it, all
+# 60 candlestick features in the LightGBM vector are permanently zero.
+# The wheel is distributed via cgohlke's GitHub releases (unofficial but
+# the standard approach for Windows Python users without conda).
+# ────────────────────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "Step 2/6: Installing TA-Lib (candlestick pattern engine)..." -ForegroundColor Cyan
+Write-Host "         Without this, all 60 CDL features in LightGBM are zero."
+
+# Check if already installed
+python -c "import talib; print('  TA-Lib', talib.__version__, 'already installed')" 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "[OK] TA-Lib already present" -ForegroundColor Green
+} else {
+    # ta-lib-binary only supports Python ≤3.8; use cgohlke's pre-compiled wheel
+    $py_ver   = python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')"
+    $whl_name = "TA_Lib-0.4.32-cp${py_ver}-cp${py_ver}-win_amd64.whl"
+    $whl_url  = "https://github.com/cgohlke/talib-build/releases/download/v0.4.32/$whl_name"
+    $whl_path = "$env:TEMP\$whl_name"
+    Write-Host "  Downloading pre-compiled wheel for Python $py_ver from cgohlke/talib-build..."
+    try {
+        Invoke-WebRequest -Uri $whl_url -OutFile $whl_path -UseBasicParsing
+        uv pip install $whl_path
+        Remove-Item $whl_path -ErrorAction SilentlyContinue
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] TA-Lib installed from cgohlke wheel" -ForegroundColor Green
+        } else {
+            Write-Host "[FAIL] TA-Lib wheel install failed" -ForegroundColor Red
+            Write-Host "  Manual fallback: conda install -c conda-forge ta-lib" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "[FAIL] Could not download TA-Lib wheel (no internet?): $_" -ForegroundColor Red
+        Write-Host "  Manual options:" -ForegroundColor Yellow
+        Write-Host "    conda install -c conda-forge ta-lib" -ForegroundColor Yellow
+        Write-Host "    or download wheel from https://github.com/cgohlke/talib-build/releases" -ForegroundColor Yellow
+    }
+}
+
+# ────────────────────────────────────────────────────────────────────────────
+# Step 3: FinBERT pre-download
 # Write Python to a temp file to avoid PowerShell here-string quoting issues
 # ────────────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "Step 2/5: Pre-downloading FinBERT model (~400 MB)..." -ForegroundColor Cyan
+Write-Host "Step 3/6: Pre-downloading FinBERT model (~400 MB)..." -ForegroundColor Cyan
 Write-Host "         Prevents 2-4 min delay on the first live news event."
 
 $finbert_script = "$repo\scripts\_tmp_finbert_download.py"
@@ -85,10 +126,10 @@ if ($LASTEXITCODE -eq 0) {
 Remove-Item $finbert_script -ErrorAction SilentlyContinue
 
 # ────────────────────────────────────────────────────────────────────────────
-# Step 3: spaCy model
+# Step 4: spaCy model
 # ────────────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "Step 3/5: Verifying spaCy en_core_web_sm..." -ForegroundColor Cyan
+Write-Host "Step 4/6: Verifying spaCy en_core_web_sm..." -ForegroundColor Cyan
 
 python -c "import spacy; spacy.load('en_core_web_sm'); print('  en_core_web_sm OK')"
 if ($LASTEXITCODE -eq 0) {
@@ -104,10 +145,10 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 # ────────────────────────────────────────────────────────────────────────────
-# Step 4: tradingview-screener API smoke test
+# Step 5: tradingview-screener API smoke test
 # ────────────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "Step 4/5: Testing tradingview-screener v3.2.1 API..." -ForegroundColor Cyan
+Write-Host "Step 5/6: Testing tradingview-screener v3.2.1 API..." -ForegroundColor Cyan
 
 $tv_script = "$repo\scripts\_tmp_tv_test.py"
 Set-Content -Path $tv_script -Encoding utf8 -Value @'
@@ -123,20 +164,26 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "[OK] tradingview-screener API working" -ForegroundColor Green
 } else {
     Write-Host "[FAIL] tradingview-screener API test failed" -ForegroundColor Red
-    Write-Host "  The Query().select().where().get_scanner_data() chain may have changed in v3.2.1"
     Write-Host "  Check: data/tv_screener.py line 84 and compare with the library's current README"
 }
 Remove-Item $tv_script -ErrorAction SilentlyContinue
 
 # ────────────────────────────────────────────────────────────────────────────
-# Step 5: LightGBM bootstrap (optional, interactive)
+# Step 6: LightGBM bootstrap (optional, interactive)
 # ────────────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "Step 5/5: LightGBM meta-model bootstrap" -ForegroundColor Cyan
+Write-Host "Step 6/6: LightGBM meta-model bootstrap" -ForegroundColor Cyan
 Write-Host "  Pulls 5 years of OHLCV for 10 core symbols, labels each bar"
 Write-Host "  via triple-barrier method, trains LightGBM. Takes ~30 minutes."
-Write-Host "  Without it: all trades use full size (no P(win) filter)."
+Write-Host "  Run this AFTER TA-Lib is installed so CDL features are non-zero."
 Write-Host ""
+
+$talib_ok = python -c "import talib" 2>$null; $talib_installed = ($LASTEXITCODE -eq 0)
+if (-not $talib_installed) {
+    Write-Host "  [WARN] TA-Lib not installed - CDL features will be zero in model." -ForegroundColor Yellow
+    Write-Host "  Install TA-Lib first, then re-run bootstrap for a better model." -ForegroundColor Yellow
+    Write-Host ""
+}
 
 try {
     $answer = Read-Host "  Run LightGBM bootstrap now? (y/N)"
@@ -168,11 +215,13 @@ Write-Host ""
 Write-Host "Start paper trading:" -ForegroundColor White
 Write-Host "  python run_server.py"
 Write-Host ""
+Write-Host "YOLOv8 chart pattern training (optional, improves 15 features):" -ForegroundColor Yellow
+Write-Host "  .\scripts\train_yolov8.ps1"
+Write-Host ""
 Write-Host "Going live checklist:" -ForegroundColor Yellow
-Write-Host "  [ ] Rotate API keys (were in git history before sanitization)"
 Write-Host "  [ ] Get free OpenBB PAT at https://my.openbb.co -> .env OPENBB_PAT="
-Write-Host "  [ ] .env: ALPACA_PAPER=false + live Alpaca API keys"
 Write-Host '  [ ] config.json "alpaca" -> "paper": false'
-Write-Host "  [ ] After bootstrap: config.json model -> meta_model_enabled: true"
+Write-Host "  [ ] .env: ALPACA_PAPER=false + live Alpaca API keys"
+Write-Host "  [ ] After TA-Lib + retrain: config.json model -> meta_model_enabled: true"
 Write-Host "  [ ] Nightly pg_dump backup via Windows Task Scheduler"
 Write-Host ""
