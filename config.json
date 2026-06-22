@@ -4,11 +4,9 @@
     "screener_picks": [],
     "manual_additions": [],
     "mandatory": [
-      "SPY",
-      "QQQ",
-      "GLD",
-      "BTC-USD",
-      "ETH-USD"
+      "SPY", "QQQ", "GLD",
+      "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA",
+      "AMD", "CRM", "NFLX", "JPM", "UBER"
     ]
   },
   "universe": {
@@ -97,18 +95,18 @@
     }
   },
   "risk": {
-    "max_position_pct": 10,
-    "cash_reserve_pct": 20,
-    "max_sector_concentration_pct": 30,
+    "max_position_pct": 5,
+    "cash_reserve_pct": 30,
+    "max_sector_concentration_pct": 25,
     "max_correlation_threshold": 0.8,
-    "max_portfolio_positions": 15,
+    "max_portfolio_positions": 8,
     "min_price_usd": 5.0,
     "min_avg_volume": 500000,
     "max_spread_pct": 0.5
   },
   "position_sizing": {
-    "base_size_pct": 5,
-    "reduced_size_pct": 2.5,
+    "base_size_pct": 2,
+    "reduced_size_pct": 1,
     "atr_multiplier_stop": 1.5,
     "atr_multiplier_target": 3.0,
     "trailing_stop_activation_pct": 20.0,
