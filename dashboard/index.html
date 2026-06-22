@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>trading-system-v2</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f1117;color:#e2e8f0;font-size:14px}
+
+/* ── Top bar ── */
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:12px 24px;border-bottom:1px solid #1e2433;background:#131722;position:sticky;top:0;z-index:100}
+.topbar-left{display:flex;align-items:center;gap:14px}
+.topbar h1{font-size:14px;font-weight:700;color:#fff;letter-spacing:-.01em}
+.live-dot{width:7px;height:7px;background:#22c55e;border-radius:50%;animation:pulse 2s infinite;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.mode-badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
+.mode-paper{background:#1c3a5e;color:#60a5fa}
+.mode-live{background:#7f1d1d;color:#fca5a5}
+.status-txt{font-size:11px;color:#64748b}
+.ks-btn{padding:5px 14px;border-radius:6px;border:none;font-size:11px;font-weight:700;cursor:pointer;transition:all .2s;letter-spacing:.04em}
+.ks-active{background:#7f1d1d;color:#fca5a5;border:1px solid #ef4444}
+.ks-inactive{background:#1e2433;color:#94a3b8;border:1px solid #374151}
+.ks-inactive:hover{background:#450a0a;color:#fca5a5;border-color:#ef4444}
+
+/* ── Layout ── */
+.main{padding:18px 24px}
+.section-gap{margin-bottom:14px}
+
+/* ── Metric cards ── */
+.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+.mcard{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:14px 16px}
+.mcard .mlabel{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.mcard .mvalue{font-size:20px;font-weight:700;color:#fff}
+.mcard .msub{font-size:10px;color:#475569;margin-top:3px}
+.up{color:#22c55e!important}
+.down{color:#ef4444!important}
+.neutral{color:#94a3b8!important}
+
+/* ── Regime bar ── */
+.regime-bar{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:12px 18px;margin-bottom:14px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.regime-item{display:flex;align-items:center;gap:8px}
+.regime-label{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em}
+.regime-val{font-size:13px;font-weight:600;color:#fff}
+.regime-pill{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
+.rp-EARLY_BULL,.rp-MID_BULL{background:#14532d;color:#22c55e}
+.rp-NEUTRAL{background:#1c2a1c;color:#86efac}
+.rp-LATE_BULL,.rp-EUPHORIA{background:#431407;color:#fb923c}
+.rp-EARLY_BEAR,.rp-MID_BEAR,.rp-CRASH{background:#450a0a;color:#ef4444}
+.rp-UNKNOWN{background:#1e2433;color:#64748b}
+
+/* ── Panel ── */
+.panel{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:16px}
+.panel-title{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px}
+
+/* ── Signal rows ── */
+.sig-row{padding:9px 0;border-bottom:1px solid #1e2433;cursor:pointer;transition:background .15s}
+.sig-row:last-child{border-bottom:none}
+.sig-row:hover{background:#1a2035;border-radius:6px;padding:9px 6px;margin:0 -6px}
+.sig-top{display:flex;justify-content:space-between;align-items:center}
+.sig-sym{font-weight:700;font-size:13px;color:#fff}
+.sig-price{font-size:11px;color:#64748b;margin-top:2px}
+.sig-right{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.badge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px}
+.badge-BUY,.badge-BUY_MOMENTUM,.badge-BUY_FUNDAMENTAL{background:#14532d;color:#22c55e}
+.badge-BUY_WEAK,.badge-WATCH{background:#1a2e1a;color:#86efac}
+.badge-SELL,.badge-EXIT_FULL,.badge-REDUCE{background:#450a0a;color:#ef4444}
+.badge-HOLD,.badge-HOLD_TREND{background:#1e3a5f;color:#60a5fa}
+.badge-DEGRADE{background:#431407;color:#fb923c}
+.badge-COOLDOWN{background:#292524;color:#f59e0b}
+.badge-ERROR{background:#1c1917;color:#64748b}
+.pwin-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px}
+.pwin-high{background:#14532d;color:#22c55e}
+.pwin-mid{background:#1a3a1a;color:#86efac}
+.pwin-low{background:#1e2433;color:#64748b}
+.sig-patterns{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}
+.pat-chip{font-size:9px;padding:1px 6px;border-radius:8px;background:#1e3a5f;color:#93c5fd}
+
+/* ── Scorecard expand ── */
+.scorecard{display:none;margin-top:10px;padding:10px;background:#0f1117;border-radius:8px;border:1px solid #1e2433}
+.scorecard.open{display:block}
+.sc-row{display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid #1e243322}
+.sc-row:last-child{border-bottom:none}
+.sc-key{color:#94a3b8}
+.sc-val{font-weight:600;color:#e2e8f0}
+
+/* ── Position rows ── */
+.pos-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #1e2433}
+.pos-row:last-child{border-bottom:none}
+.pos-sym{font-weight:700;font-size:13px;color:#fff}
+.pos-meta{font-size:10px;color:#64748b;margin-top:2px}
+.pos-pnl{font-weight:700;font-size:13px;text-align:right}
+.pos-pct{font-size:10px;color:#64748b;text-align:right;margin-top:2px}
+
+/* ── Trade rows ── */
+.trade-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #1e2433;font-size:12px}
+.trade-row:last-child{border-bottom:none}
+.t-sym{font-weight:700;color:#fff}
+.t-meta{font-size:10px;color:#64748b;margin-top:2px}
+.t-side-BUY{color:#22c55e;font-weight:700;font-size:11px}
+.t-side-SELL{color:#ef4444;font-weight:700;font-size:11px}
+
+/* ── News / fincept layer ── */
+.news-panel{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:16px;margin-bottom:14px}
+.news-filter-bar{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+.nf-btn{padding:4px 12px;border-radius:20px;border:1px solid #1e2433;background:transparent;color:#94a3b8;font-size:11px;cursor:pointer;transition:all .15s}
+.nf-btn.active{background:#1e3a5f;border-color:#3b82f6;color:#93c5fd}
+.nf-search{flex:1;min-width:120px;max-width:200px;background:#0f1117;border:1px solid #1e2433;border-radius:6px;padding:4px 10px;color:#e2e8f0;font-size:11px;outline:none}
+.nf-search::placeholder{color:#475569}
+.news-grid{display:flex;flex-direction:column;gap:0}
+.news-item{padding:10px 0;border-bottom:1px solid #1e2433;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:start}
+.news-item:last-child{border-bottom:none}
+.sent-pill{width:38px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px}
+.sp-bull{background:#14532d;color:#22c55e}
+.sp-bear{background:#450a0a;color:#ef4444}
+.sp-neu{background:#1c1917;color:#64748b}
+.news-body{}
+.news-headline{font-size:12px;color:#e2e8f0;line-height:1.4;margin-bottom:4px}
+.news-headline a{color:inherit;text-decoration:none}
+.news-headline a:hover{color:#93c5fd}
+.news-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.news-source{font-size:10px;color:#64748b}
+.news-age{font-size:10px;color:#475569}
+.news-tickers{display:flex;gap:3px;flex-wrap:wrap}
+.ticker-chip{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;background:#1e2433;color:#94a3b8;cursor:pointer}
+.ticker-chip:hover{background:#1e3a5f;color:#93c5fd}
+.threat-chip{font-size:9px;font-weight:700;padding:1px 7px;border-radius:8px}
+.tc-CRITICAL{background:#450a0a;color:#ef4444}
+.tc-HIGH{background:#431407;color:#fb923c}
+.tc-MEDIUM{background:#292524;color:#f59e0b}
+.tc-LOW,.tc-NONE,.tc-UNKNOWN{display:none}
+
+/* ── Watchlist ── */
+.wl-panel{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:16px;margin-bottom:14px}
+.wl-chips{display:flex;flex-wrap:wrap;gap:6px}
+.wl-chip{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#1e2433;color:#94a3b8;cursor:default}
+.wl-chip.has-pos{background:#14532d;color:#22c55e}
+.wl-chip.has-signal{background:#1e3a5f;color:#60a5fa}
+.wl-add{display:flex;gap:8px;margin-top:10px}
+.wl-input{flex:1;background:#0f1117;border:1px solid #1e2433;border-radius:6px;padding:7px 12px;color:#fff;font-size:13px;outline:none}
+.wl-input::placeholder{color:#475569}
+.wl-add-btn{background:#3b82f6;border:none;border-radius:6px;padding:7px 18px;color:#fff;font-size:13px;cursor:pointer;font-weight:600}
+.wl-add-btn:hover{background:#2563eb}
+.wl-msg{font-size:11px;color:#64748b;margin-top:6px;min-height:16px}
+
+/* ── Performance ── */
+.perf-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.pc{background:#0f1117;border:1px solid #1e2433;border-radius:8px;padding:12px;text-align:center}
+.pc-label{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.pc-val{font-size:18px;font-weight:700;color:#fff}
+.perf-table{width:100%;border-collapse:collapse;font-size:11px}
+.perf-table th{color:#64748b;text-transform:uppercase;font-size:10px;letter-spacing:.05em;padding:6px 8px;text-align:left;border-bottom:1px solid #1e2433}
+.perf-table td{padding:6px 8px;border-bottom:1px solid #1e243322;color:#e2e8f0}
+.perf-table tr:last-child td{border-bottom:none}
+
+/* ── Health panel ── */
+.health-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.hc{background:#0f1117;border:1px solid #1e2433;border-radius:8px;padding:12px}
+.hc-label{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.hc-val{font-size:12px;font-weight:600;color:#e2e8f0}
+.hc-ok{color:#22c55e}
+.hc-warn{color:#f59e0b}
+.hc-err{color:#ef4444}
+
+/* ── Misc ── */
+.empty{font-size:12px;color:#475569;padding:8px 0}
+.loading{font-size:12px;color:#475569;padding:8px 0}
+.refresh-row{text-align:right;font-size:11px;color:#64748b;margin-bottom:14px}
+.refresh-row a{color:#3b82f6;text-decoration:none}
+.refresh-row a:hover{color:#60a5fa}
+.section-hdr{font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #1e2433;display:flex;justify-content:space-between;align-items:center}
+.model-badge{font-size:10px;padding:2px 8px;border-radius:10px;background:#1a3a1a;color:#4ade80;font-weight:700}
+
+/* ── Insider / analyst rows ── */
+.ins-row,.rat-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #1e2433;font-size:12px}
+.ins-row:last-child,.rat-row:last-child{border-bottom:none}
+.ins-sym,.rat-sym{font-weight:700;color:#fff;min-width:52px}
+.ins-meta,.rat-meta{font-size:10px;color:#64748b;margin-top:2px}
+.ins-side-Buy{color:#22c55e;font-weight:600}
+.ins-side-Sell{color:#ef4444;font-weight:600}
+.rat-action-upgrade{color:#22c55e;font-weight:600}
+.rat-action-downgrade{color:#ef4444;font-weight:600}
+.rat-action-initiate{color:#60a5fa;font-weight:600}
+
+/* ── Eco calendar ── */
+.eco-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #1e2433;font-size:12px}
+.eco-row:last-child{border-bottom:none}
+.eco-event{color:#e2e8f0}
+.eco-impact-high{color:#ef4444;font-weight:700;font-size:10px}
+.eco-impact-med{color:#f59e0b;font-size:10px}
+.eco-impact-low{color:#475569;font-size:10px}
+.eco-time{font-size:10px;color:#64748b}
+</style>
+</head>
+<body>
+
+<!-- ── Top bar ─────────────────────────────────────────────── -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="live-dot" id="live-dot"></div>
+    <h1>trading-system-v2</h1>
+    <span class="mode-badge mode-paper" id="mode-badge">PAPER</span>
+    <span class="status-txt" id="last-updated">Connecting...</span>
+  </div>
+  <div class="topbar-right">
+    <span id="regime-topbar" style="font-size:12px;color:#64748b"></span>
+    <span id="model-status" class="model-badge" style="display:none">LGB ON</span>
+    <button class="ks-btn ks-inactive" id="ks-btn" onclick="toggleKillSwitch()">⚡ KILL SWITCH</button>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- ── Refresh bar ───────────────────────────────────────── -->
+<div class="refresh-row">
+  Auto-refreshes every 60s &nbsp;|&nbsp;
+  <a href="#" onclick="refreshAll(true)">Refresh now</a>
+  &nbsp;|&nbsp; <span id="next-refresh"></span>
+</div>
+
+<!-- ── Metric cards ─────────────────────────────────────── -->
+<div class="metrics" id="metrics-row">
+  <div class="mcard"><div class="mlabel">Cash</div><div class="mvalue" id="m-cash">—</div><div class="msub">deployable</div></div>
+  <div class="mcard"><div class="mlabel">Portfolio</div><div class="mvalue" id="m-total">—</div><div class="msub" id="m-total-pnl"></div></div>
+  <div class="mcard"><div class="mlabel">Unrealized P&L</div><div class="mvalue" id="m-unreal">—</div><div class="msub">open positions</div></div>
+  <div class="mcard"><div class="mlabel">Realized P&L</div><div class="mvalue" id="m-real">—</div><div class="msub">closed trades</div></div>
+  <div class="mcard"><div class="mlabel">Positions</div><div class="mvalue" id="m-positions">—</div><div class="msub" id="m-trades-sub">trades today</div></div>
+</div>
+
+<!-- ── Regime bar ───────────────────────────────────────── -->
+<div class="regime-bar" id="regime-bar">
+  <div class="regime-item">
+    <span class="regime-label">Regime</span>
+    <span class="regime-pill rp-UNKNOWN" id="rb-regime">—</span>
+  </div>
+  <div class="regime-item">
+    <span class="regime-label">Entry</span>
+    <span class="regime-val" id="rb-entry">—</span>
+  </div>
+  <div class="regime-item" style="margin-left:auto">
+    <span class="regime-label">Model</span>
+    <span class="regime-val" id="rb-model">—</span>
+  </div>
+  <div class="regime-item">
+    <span class="regime-label">Samples</span>
+    <span class="regime-val" id="rb-samples">—</span>
+  </div>
+</div>
+
+<!-- ── Signals + Positions ──────────────────────────────── -->
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-title">
+      Live signals <span style="color:#475569;font-weight:400;font-size:10px">click for scorecard</span>
+    </div>
+    <div id="signals-list"><div class="loading">Loading signals...</div></div>
+  </div>
+  <div>
+    <div class="panel section-gap">
+      <div class="panel-title">Open positions</div>
+      <div id="positions-list"><div class="loading">Loading...</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Recent trades</div>
+      <div id="trades-list"><div class="loading">Loading...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── News & Intelligence (fincept layer) ─────────────── -->
+<div class="news-panel section-gap">
+  <div class="panel-title" style="margin-bottom:10px">
+    News &amp; Intelligence
+    <span style="font-size:10px;color:#475569;font-weight:400">FinBERT scored · 39 sources · live feed</span>
+  </div>
+  <div class="news-filter-bar">
+    <button class="nf-btn active" onclick="setNewsFilter('all',this)">All</button>
+    <button class="nf-btn" onclick="setNewsFilter('bull',this)">📈 Bullish</button>
+    <button class="nf-btn" onclick="setNewsFilter('bear',this)">📉 Bearish</button>
+    <button class="nf-btn" onclick="setNewsFilter('threat',this)">⚠️ High threat</button>
+    <input class="nf-search" id="news-ticker-input" placeholder="Filter by ticker…" oninput="applyNewsFilter()">
+  </div>
+  <div id="news-list"><div class="loading">Loading news...</div></div>
+</div>
+
+<!-- ── Watchlist ────────────────────────────────────────── -->
+<div class="wl-panel section-gap">
+  <div class="section-hdr" style="cursor:pointer" onclick="toggleWatchlist()">
+    Watchlist
+    <span id="wl-count" style="font-weight:400;font-size:10px"></span>
+  </div>
+  <div id="wl-body">
+    <div class="wl-chips" id="wl-chips"></div>
+    <div class="wl-add">
+      <input class="wl-input" id="wl-input" placeholder="Add symbol e.g. NVDA, TSM" onkeydown="if(event.key==='Enter')addTicker()">
+      <button class="wl-add-btn" onclick="addTicker()">+ Add</button>
+    </div>
+    <div class="wl-msg" id="wl-msg"></div>
+  </div>
+</div>
+
+<!-- ── Insider · Analyst · Eco calendar ─────────────────── -->
+<div class="three-col">
+  <div class="panel">
+    <div class="panel-title">Insider trades</div>
+    <div id="insider-list"><div class="loading">Loading...</div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Analyst ratings</div>
+    <div id="analyst-list"><div class="loading">Loading...</div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Economic calendar</div>
+    <div id="eco-list"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<!-- ── Performance ─────────────────────────────────────── -->
+<div class="panel section-gap">
+  <div class="panel-title">Performance analytics</div>
+  <div class="perf-grid" id="perf-grid">
+    <div class="pc"><div class="pc-label">Win Rate</div><div class="pc-val" id="p-winrate">—</div></div>
+    <div class="pc"><div class="pc-label">Profit Factor</div><div class="pc-val" id="p-pf">—</div></div>
+    <div class="pc"><div class="pc-label">Total P&L</div><div class="pc-val" id="p-pnl">—</div></div>
+    <div class="pc"><div class="pc-label">Avg Win</div><div class="pc-val up" id="p-avgwin">—</div></div>
+    <div class="pc"><div class="pc-label">Avg Loss</div><div class="pc-val down" id="p-avgloss">—</div></div>
+    <div class="pc"><div class="pc-label">Total Trades</div><div class="pc-val" id="p-trades">—</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px">
+    <div>
+      <div class="section-hdr" style="margin-bottom:8px">By setup</div>
+      <div id="perf-setup-list"><div class="empty">No data yet</div></div>
+    </div>
+    <div>
+      <div class="section-hdr" style="margin-bottom:8px">By symbol</div>
+      <div id="perf-symbol-list"><div class="empty">No data yet</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── System health ────────────────────────────────────── -->
+<div class="panel section-gap">
+  <div class="panel-title">System health</div>
+  <div class="health-grid">
+    <div class="hc"><div class="hc-label">Scheduler</div><div class="hc-val" id="h-scheduler">—</div></div>
+    <div class="hc"><div class="hc-label">Cache</div><div class="hc-val" id="h-cache">—</div></div>
+    <div class="hc"><div class="hc-label">Kill switch</div><div class="hc-val" id="h-ks">—</div></div>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<script>
+// ── State ───────────────────────────────────────────────────────
+let _news = [];
+let _newsFilter = 'all';
+let _signals = [];
+let _positions = [];
+let _wlVisible = true;
+let _ksActive = false;
+let _refreshTimer = 60;
+let _refreshInterval;
+
+// ── Utils ───────────────────────────────────────────────────────
+const fmt$ = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+const fmtPct = v => v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2) + '%';
+const pnlClass = v => v > 0 ? 'up' : v < 0 ? 'down' : 'neutral';
+const el = id => document.getElementById(id);
+
+async function apiFetch(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+// ── Portfolio ────────────────────────────────────────────────────
+async function loadPortfolio() {
+  const d = await apiFetch('/api/portfolio');
+  if (!d || d.status !== 'ok') return;
+  const p = d.data;
+
+  el('m-cash').textContent = fmt$(p.cash);
+  el('m-total').textContent = fmt$(p.total_value);
+  el('m-total-pnl').innerHTML = `<span class="${pnlClass(p.total_pnl)}">${fmtPct(p.total_pnl_pct)}</span> all time`;
+
+  const unreal = p.positions?.reduce((s,x) => s + (x.pnl||0), 0) || 0;
+  el('m-unreal').className = 'mvalue ' + pnlClass(unreal);
+  el('m-unreal').textContent = fmt$(unreal);
+
+  el('m-positions').textContent = (p.positions||[]).length;
+  el('m-real').textContent = fmt$(p.total_pnl);
+  el('m-real').className = 'mvalue ' + pnlClass(p.total_pnl);
+
+  _positions = p.positions || [];
+  renderPositions(_positions);
+  renderTrades(p.trades || []);
+}
+
+function renderPositions(pos) {
+  const c = el('positions-list');
+  if (!pos.length) { c.innerHTML = '<div class="empty">No open positions</div>'; return; }
+  c.innerHTML = pos.map(p => `
+    <div class="pos-row">
+      <div>
+        <div class="pos-sym">${p.symbol}</div>
+        <div class="pos-meta">${p.shares} sh · avg ${fmt$(p.avg_price)}</div>
+      </div>
+      <div>
+        <div class="pos-pnl ${pnlClass(p.pnl)}">${fmt$(p.pnl)}</div>
+        <div class="pos-pct">${fmtPct(p.pnl_pct)} · ${fmt$(p.value)}</div>
+      </div>
+    </div>`).join('');
+}
+
+function renderTrades(trades) {
+  const c = el('trades-list');
+  if (!trades.length) { c.innerHTML = '<div class="empty">No trades yet</div>'; return; }
+  c.innerHTML = trades.slice(0,8).map(t => `
+    <div class="trade-row">
+      <div>
+        <div class="t-sym">${t.symbol} <span class="t-side-${t.action}">${t.action}</span></div>
+        <div class="t-meta">${t.shares} sh @ ${fmt$(t.price)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-weight:600;color:#e2e8f0">${fmt$(t.value)}</div>
+        <div class="t-meta">${t.timestamp ? t.timestamp.slice(0,16).replace('T',' ') : ''}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ── Signals ──────────────────────────────────────────────────────
+async function loadSignals() {
+  const d = await apiFetch('/api/signals');
+  if (!d || d.status !== 'ok') return;
+  _signals = d.data || [];
+
+  const sorted = [..._signals].sort((a,b) => {
+    const order = {BUY:0,BUY_MOMENTUM:0,BUY_FUNDAMENTAL:0,BUY_WEAK:1,WATCH:2,HOLD:3,HOLD_TREND:3,DEGRADE:4,REDUCE:5,EXIT_FULL:6,SELL:6,COOLDOWN:7,ERROR:99};
+    return (order[a.signal_label]??50) - (order[b.signal_label]??50);
+  });
+
+  const hasPwin = sorted.some(s => s.p_win != null);
+  el('model-status').style.display = hasPwin ? '' : 'none';
+
+  const c = el('signals-list');
+  if (!sorted.length) { c.innerHTML = '<div class="empty">No signals</div>'; return; }
+  c.innerHTML = sorted.map((s,i) => {
+    const label = s.signal_label || 'HOLD';
+    const pwin = s.p_win;
+    const pwinHtml = pwin != null
+      ? `<span class="pwin-badge ${pwin>=.65?'pwin-high':pwin>=.52?'pwin-mid':'pwin-low'}">P(win) ${(pwin*100).toFixed(0)}%</span>`
+      : '';
+    const patterns = Object.entries(s).filter(([k,v]) => k.startsWith('chart_') && v).map(([k]) =>
+      `<span class="pat-chip">${k.replace('chart_','').replace(/_/g,' ')}</span>`
+    ).join('');
+    return `
+    <div class="sig-row" onclick="toggleScorecard(${i})">
+      <div class="sig-top">
+        <div>
+          <div class="sig-sym">${s.symbol}</div>
+          <div class="sig-price">$${(s.price||0).toFixed(2)} · RSI ${(s.rsi||0).toFixed(1)}</div>
+        </div>
+        <div class="sig-right">
+          ${pwinHtml}
+          <span class="badge badge-${label}">${label.replace(/_/g,' ')}</span>
+        </div>
+      </div>
+      ${patterns ? `<div class="sig-patterns">${patterns}</div>` : ''}
+      <div class="scorecard" id="sc-${i}">
+        ${buildScorecard(s)}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function buildScorecard(s) {
+  const rows = [
+    ['Score', s.normalised_score != null ? (s.normalised_score*100).toFixed(1)+'%' : '—'],
+    ['Conviction', s.conviction || '—'],
+    ['Bundle', s.bundle_name || '—'],
+    ['Signal type', s.signal_type || '—'],
+    ['Velocity', s.score_velocity != null ? (s.score_velocity>0?'+':'')+s.score_velocity.toFixed(3) : '—'],
+    ['Updated', s.timestamp ? s.timestamp.slice(11,16) : '—'],
+  ];
+  return rows.map(([k,v]) => `<div class="sc-row"><span class="sc-key">${k}</span><span class="sc-val">${v}</span></div>`).join('');
+}
+
+function toggleScorecard(i) {
+  const sc = el(`sc-${i}`);
+  if (sc) sc.classList.toggle('open');
+}
+
+// ── Regime ───────────────────────────────────────────────────────
+async function loadRegime() {
+  const d = await apiFetch('/api/regime');
+  if (!d || d.status !== 'ok') return;
+  const r = d.data;
+  const pill = el('rb-regime');
+  pill.textContent = r.regime;
+  pill.className = `regime-pill rp-${r.regime}`;
+  el('rb-entry').textContent = r.allowed_entry ? '✓ Open' : '✗ Blocked';
+  el('rb-entry').className = 'regime-val ' + (r.allowed_entry ? 'up' : 'down');
+  el('regime-topbar').textContent = r.regime;
+
+  // model info from health
+  const h = await apiFetch('/api/health/scheduler');
+  if (h?.data) {
+    el('rb-model').textContent = h.data.meta_model_enabled ? 'LightGBM ON' : 'OFF';
+    el('rb-model').className = 'regime-val ' + (h.data.meta_model_enabled ? 'up' : 'neutral');
+  }
+}
+
+// ── News (fincept layer) ─────────────────────────────────────────
+async function loadNews() {
+  const d = await apiFetch('/api/news?hours=48&limit=80');
+  if (!d || d.status !== 'ok') return;
+  _news = d.data || [];
+  renderNews();
+}
+
+function setNewsFilter(f, btn) {
+  _newsFilter = f;
+  document.querySelectorAll('.nf-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  el('news-ticker-input').value = '';
+  renderNews();
+}
+
+function applyNewsFilter() { renderNews(); }
+
+function renderNews() {
+  const ticker = el('news-ticker-input').value.trim().toUpperCase();
+  let items = [..._news];
+
+  if (_newsFilter === 'bull') items = items.filter(a => a.sentiment > 0.45);
+  else if (_newsFilter === 'bear') items = items.filter(a => a.sentiment < -0.45);
+  else if (_newsFilter === 'threat') items = items.filter(a => ['CRITICAL','HIGH'].includes(a.threat));
+
+  if (ticker) items = items.filter(a => a.tickers?.some(t => t.includes(ticker)) || a.title?.toUpperCase().includes(ticker));
+
+  const c = el('news-list');
+  if (!items.length) { c.innerHTML = '<div class="empty">No articles match the filter</div>'; return; }
+
+  c.innerHTML = items.slice(0,40).map(a => {
+    const s = a.sentiment;
+    const sc = s > 0.2 ? 'sp-bull' : s < -0.2 ? 'sp-bear' : 'sp-neu';
+    const slabel = s > 0.2 ? '+' : s < -0.2 ? '−' : '~';
+    const tickers = (a.tickers||[]).map(t => `<span class="ticker-chip" onclick="filterByTicker('${t}')">${t}</span>`).join('');
+    const threat = a.threat && !['LOW','NONE','UNKNOWN'].includes(a.threat)
+      ? `<span class="threat-chip tc-${a.threat}">${a.threat}</span>` : '';
+    return `
+    <div class="news-item">
+      <div class="sent-pill ${sc}">${slabel}${Math.abs(s).toFixed(1)}</div>
+      <div class="news-body">
+        <div class="news-headline"><a href="${a.url||'#'}" target="_blank" rel="noopener">${a.title}</a></div>
+        <div class="news-meta">
+          <span class="news-source">${a.source}</span>
+          <span class="news-age">${a.age_label}</span>
+          ${threat}
+          <div class="news-tickers">${tickers}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function filterByTicker(t) {
+  el('news-ticker-input').value = t;
+  _newsFilter = 'all';
+  document.querySelectorAll('.nf-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('.nf-btn').classList.add('active');
+  renderNews();
+}
+
+// ── Watchlist ────────────────────────────────────────────────────
+async function loadWatchlist() {
+  const d = await apiFetch('/api/watchlist');
+  if (!d || d.status !== 'ok') return;
+  const syms = d.data || [];
+  el('wl-count').textContent = `${syms.length} symbols`;
+  const posSyms = new Set((_positions||[]).map(p => p.symbol));
+  const sigSyms = new Set((_signals||[]).filter(s => s.signal_label?.startsWith('BUY')).map(s => s.symbol));
+  el('wl-chips').innerHTML = syms.map(s =>
+    `<span class="wl-chip ${posSyms.has(s)?'has-pos':sigSyms.has(s)?'has-signal':''}">${s}</span>`
+  ).join('');
+}
+
+function toggleWatchlist() {
+  _wlVisible = !_wlVisible;
+  el('wl-body').style.display = _wlVisible ? '' : 'none';
+}
+
+async function addTicker() {
+  const val = el('wl-input').value.trim().toUpperCase();
+  if (!val) return;
+  const msg = el('wl-msg');
+  msg.textContent = 'Adding...';
+  const r = await apiFetch(`/api/watchlist/add-manual?symbol=${val}`);
+  if (r?.status === 'ok') {
+    msg.textContent = `✓ ${val} added`;
+    el('wl-input').value = '';
+    setTimeout(() => loadWatchlist(), 500);
+  } else {
+    msg.textContent = r?.message || 'Failed';
+  }
+  setTimeout(() => { msg.textContent = ''; }, 3000);
+}
+
+// ── Insider + Analyst ────────────────────────────────────────────
+async function loadInsider() {
+  const syms = (_positions||[]).map(p=>p.symbol).slice(0,5);
+  if (!syms.length) { el('insider-list').innerHTML = '<div class="empty">No positions to check</div>'; return; }
+  const results = await Promise.all(syms.map(s => apiFetch(`/api/insider/${s}`)));
+  const all = results.flatMap((r,i) => (r?.data||[]).map(t => ({...t, symbol: syms[i]})));
+  const c = el('insider-list');
+  if (!all.length) { c.innerHTML = '<div class="empty">No recent insider trades</div>'; return; }
+  c.innerHTML = all.slice(0,8).map(t => `
+    <div class="ins-row">
+      <div><div class="ins-sym">${t.symbol}</div><div class="ins-meta">${t.name||''}</div></div>
+      <div style="text-align:right">
+        <div class="ins-side-${t.transaction_type||'Buy'}">${t.transaction_type||'Buy'}</div>
+        <div class="ins-meta">${t.shares ? t.shares.toLocaleString()+' sh' : ''} ${t.date||''}</div>
+      </div>
+    </div>`).join('');
+}
+
+async function loadAnalyst() {
+  const syms = (_positions||[]).map(p=>p.symbol).slice(0,5);
+  if (!syms.length) { el('analyst-list').innerHTML = '<div class="empty">No positions to check</div>'; return; }
+  const results = await Promise.all(syms.map(s => apiFetch(`/api/analyst/${s}`)));
+  const all = results.flatMap((r,i) => (r?.data||[]).map(t => ({...t, symbol: syms[i]})));
+  const c = el('analyst-list');
+  if (!all.length) { c.innerHTML = '<div class="empty">No recent ratings</div>'; return; }
+  c.innerHTML = all.slice(0,8).map(t => `
+    <div class="rat-row">
+      <div><div class="rat-sym">${t.symbol}</div><div class="rat-meta">${t.firm||''}</div></div>
+      <div style="text-align:right">
+        <div class="rat-action-${(t.action||'').toLowerCase()}">${t.action||''}</div>
+        <div class="rat-meta">${t.target_price ? 'PT $'+t.target_price : ''} ${t.date||''}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ── Economic calendar ────────────────────────────────────────────
+async function loadEco() {
+  const d = await apiFetch('/api/economic-calendar');
+  if (!d || d.status !== 'ok') return;
+  const events = d.data || [];
+  const c = el('eco-list');
+  if (!events.length) { c.innerHTML = '<div class="empty">No events</div>'; return; }
+  c.innerHTML = events.slice(0,8).map(e => `
+    <div class="eco-row">
+      <div>
+        <div class="eco-event">${e.event||e.name||'Event'}</div>
+        <div style="font-size:10px;color:#64748b">${e.country||''} ${e.previous!=null?'Prev: '+e.previous:''}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="eco-impact-${(e.impact||'low').toLowerCase()}">${(e.impact||'').toUpperCase()}</div>
+        <div class="eco-time">${e.date||e.time||''}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ── Performance ──────────────────────────────────────────────────
+async function loadPerformance() {
+  const d = await apiFetch('/api/performance/summary');
+  if (!d || d.status !== 'ok') return;
+  const p = d.data || {};
+  const set = (id, val, cls) => {
+    const e = el(id); if (!e) return;
+    e.textContent = val; if (cls) e.className = 'pc-val ' + cls;
+  };
+  set('p-winrate', p.win_rate != null ? (p.win_rate*100).toFixed(1)+'%' : '—',
+    p.win_rate > .55 ? 'up' : p.win_rate < .4 ? 'down' : '');
+  set('p-pf', p.profit_factor?.toFixed(2) ?? '—', p.profit_factor > 1.5 ? 'up' : p.profit_factor < 1 ? 'down' : '');
+  set('p-pnl', p.total_pnl != null ? fmt$(p.total_pnl) : '—', pnlClass(p.total_pnl));
+  set('p-avgwin', p.avg_win != null ? fmt$(p.avg_win) : '—');
+  set('p-avgloss', p.avg_loss != null ? fmt$(p.avg_loss) : '—');
+  set('p-trades', p.total_trades ?? '—');
+
+  const bys = await apiFetch('/api/performance/by_setup');
+  if (bys?.data?.length) {
+    el('perf-setup-list').innerHTML = `<table class="perf-table"><thead><tr><th>Setup</th><th>Trades</th><th>Win%</th><th>P&L</th></tr></thead><tbody>
+    ${bys.data.map(r => `<tr><td>${r.setup_type||'—'}</td><td>${r.count}</td>
+    <td class="${r.win_rate>.55?'up':r.win_rate<.4?'down':''}">${r.win_rate!=null?(r.win_rate*100).toFixed(0)+'%':'—'}</td>
+    <td class="${pnlClass(r.total_pnl)}">${fmt$(r.total_pnl)}</td></tr>`).join('')}
+    </tbody></table>`;
+  }
+  const bysym = await apiFetch('/api/performance/by_symbol');
+  if (bysym?.data?.length) {
+    el('perf-symbol-list').innerHTML = `<table class="perf-table"><thead><tr><th>Symbol</th><th>Trades</th><th>Win%</th><th>P&L</th></tr></thead><tbody>
+    ${bysym.data.slice(0,8).map(r => `<tr><td><b>${r.symbol}</b></td><td>${r.count}</td>
+    <td class="${r.win_rate>.55?'up':r.win_rate<.4?'down':''}">${r.win_rate!=null?(r.win_rate*100).toFixed(0)+'%':'—'}</td>
+    <td class="${pnlClass(r.total_pnl)}">${fmt$(r.total_pnl)}</td></tr>`).join('')}
+    </tbody></table>`;
+  }
+}
+
+// ── Health ───────────────────────────────────────────────────────
+async function loadHealth() {
+  const [sch, ks] = await Promise.all([
+    apiFetch('/api/health/scheduler'),
+    apiFetch('/api/kill-switch/status'),
+  ]);
+  if (sch?.data) {
+    const ok = sch.data.running !== false;
+    el('h-scheduler').textContent = ok ? 'Running' : 'Stopped';
+    el('h-scheduler').className = 'hc-val ' + (ok ? 'hc-ok' : 'hc-err');
+    const me = sch.data.meta_model_enabled;
+    const samples = sch.data.n_features ? `${sch.data.n_features} features` : '';
+    el('rb-samples').textContent = samples || '—';
+  }
+  if (ks?.data) {
+    _ksActive = ks.data.active === true;
+    const btn = el('ks-btn');
+    const ksEl = el('h-ks');
+    if (_ksActive) {
+      btn.className = 'ks-btn ks-active';
+      btn.textContent = '🔴 KILL ACTIVE';
+      ksEl.textContent = 'ACTIVE — no new trades';
+      ksEl.className = 'hc-val hc-err';
+    } else {
+      btn.className = 'ks-btn ks-inactive';
+      btn.textContent = '⚡ KILL SWITCH';
+      ksEl.textContent = 'Inactive';
+      ksEl.className = 'hc-val hc-ok';
+    }
+  }
+  // cache
+  const ca = await apiFetch('/api/health/cache');
+  if (ca?.data) {
+    const stale = Object.values(ca.data).some(v => v?.stale);
+    el('h-cache').textContent = stale ? 'Stale layers' : 'Fresh';
+    el('h-cache').className = 'hc-val ' + (stale ? 'hc-warn' : 'hc-ok');
+  }
+}
+
+// ── Kill switch ──────────────────────────────────────────────────
+async function toggleKillSwitch() {
+  const url = _ksActive ? '/api/kill-switch/deactivate' : '/api/kill-switch/activate';
+  const r = await fetch(url, {method:'POST'});
+  if (r.ok) await loadHealth();
+}
+
+// ── Refresh countdown ────────────────────────────────────────────
+function startCountdown() {
+  clearInterval(_refreshInterval);
+  _refreshTimer = 60;
+  _refreshInterval = setInterval(() => {
+    _refreshTimer--;
+    el('next-refresh').textContent = `Next refresh in ${_refreshTimer}s`;
+    if (_refreshTimer <= 0) refreshAll(false);
+  }, 1000);
+}
+
+// ── Master refresh ───────────────────────────────────────────────
+async function refreshAll(manual=false) {
+  el('last-updated').textContent = 'Refreshing...';
+  if (manual) startCountdown();
+  await Promise.all([
+    loadPortfolio(),
+    loadSignals(),
+    loadRegime(),
+    loadNews(),
+    loadEco(),
+    loadHealth(),
+  ]);
+  await Promise.all([loadWatchlist(), loadInsider(), loadAnalyst()]);
+  loadPerformance();
+  el('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+// ── Boot ─────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  refreshAll(false);
+  startCountdown();
+});
+</script>
+</body>
+</html>
