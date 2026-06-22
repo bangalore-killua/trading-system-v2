@@ -14,6 +14,7 @@ Data sources (all free):
 This module is called by the regime detector every 4 hours and on startup.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional
@@ -33,9 +34,9 @@ class MacroAnalyser:
         "cpi_yoy": "CPIAUCSL",
     }
 
-    def __init__(self, use_fred: bool = False):
-        # FRED requires pandas-datareader; disable if not installed
+    def __init__(self, use_fred: bool = False, openbb_provider=None):
         self._use_fred = use_fred
+        self._openbb = openbb_provider  # data.openbb_provider.OpenBBProvider
         self._cache: Dict[str, dict] = {}
         self._cache_ttl_minutes = 60
 
@@ -53,33 +54,57 @@ class MacroAnalyser:
 
         snapshot = {}
 
-        # ── VIX ────────────────────────────────────────────────────────────
-        snapshot["vix"] = self._fetch_last_close("^VIX")
+        # ── VIX — try OpenBB FRED (VIXCLS) first, yfinance fallback ───────────
+        vix_openbb = self._fetch_openbb_fred("VIXCLS") if self._openbb else None
+        snapshot["vix"] = vix_openbb if vix_openbb else self._fetch_last_close("^VIX")
+        if vix_openbb is None and self._openbb:
+            from server.telegram_alerts import notify_failure
+            notify_failure(
+                source="MacroAnalyser.get_macro_snapshot (VIXCLS)",
+                error_type="DataFetchFailed",
+                cause="OpenBB FRED VIXCLS returned no data",
+                affects="VIX value — using yfinance ^VIX as fallback",
+            )
 
-        # ── Yield Spread (10Y - 2Y) ─────────────────────────────────────────
-        tnx = self._fetch_last_close("^TNX")  # 10-year yield * 10 (Yahoo format)
-        irx = self._fetch_last_close("^IRX")  # 3-month yield * 10
-        tyx = self._fetch_last_close("^TYX")  # 30-year yield * 10
-
-        # ^TNX is reported as yield * 10 on some Yahoo endpoints — normalise
-        if tnx and tnx > 20:
-            tnx = tnx / 10
-        if irx and irx > 20:
-            irx = irx / 10
-        if tyx and tyx > 20:
-            tyx = tyx / 10
-
-        snapshot["yield_10y"] = tnx
-        snapshot["yield_3m"] = irx
-        snapshot["yield_30y"] = tyx
-
-        # 10Y-2Y spread approximation (use 3M as proxy when 2Y not available)
-        if tnx and irx:
-            snapshot["yield_spread_10y2y"] = round(tnx - irx, 3)
-            snapshot["inverted_yield_curve"] = int(tnx < irx)
+        # ── Yield Spread — try OpenBB FRED T10Y2Y first ─────────────────────
+        # T10Y2Y is the 10Y-2Y spread published directly by FRED — more reliable
+        # than computing it from Yahoo's ^TNX and ^IRX separately.
+        spread_openbb = self._fetch_openbb_fred("T10Y2Y") if self._openbb else None
+        if spread_openbb is not None:
+            snapshot["yield_spread_10y2y"] = round(spread_openbb, 3)
+            snapshot["inverted_yield_curve"] = int(spread_openbb < 0)
+            # Individual yields from yfinance (for display; spread already set)
+            tnx = self._fetch_last_close("^TNX")
+            irx = self._fetch_last_close("^IRX")
+            tyx = self._fetch_last_close("^TYX")
         else:
-            snapshot["yield_spread_10y2y"] = None
-            snapshot["inverted_yield_curve"] = 0
+            if self._openbb:
+                from server.telegram_alerts import notify_failure
+                notify_failure(
+                    source="MacroAnalyser.get_macro_snapshot (T10Y2Y)",
+                    error_type="DataFetchFailed",
+                    cause="OpenBB FRED T10Y2Y returned no data",
+                    affects="Yield spread — using yfinance ^TNX/^IRX approximation",
+                )
+            tnx = self._fetch_last_close("^TNX")
+            irx = self._fetch_last_close("^IRX")
+            tyx = self._fetch_last_close("^TYX")
+            if tnx and tnx > 20:
+                tnx /= 10
+            if irx and irx > 20:
+                irx /= 10
+            if tyx and tyx > 20:
+                tyx /= 10
+            if tnx and irx:
+                snapshot["yield_spread_10y2y"] = round(tnx - irx, 3)
+                snapshot["inverted_yield_curve"] = int(tnx < irx)
+            else:
+                snapshot["yield_spread_10y2y"] = None
+                snapshot["inverted_yield_curve"] = 0
+
+        snapshot["yield_10y"] = tnx if spread_openbb is None else self._fetch_last_close("^TNX")
+        snapshot["yield_3m"] = irx if spread_openbb is None else self._fetch_last_close("^IRX")
+        snapshot["yield_30y"] = tyx if spread_openbb is None else self._fetch_last_close("^TYX")
 
         # ── SPY Trend (50/200 MA alignment) ────────────────────────────────
         spy_data = self._fetch_spy_trend()
@@ -182,6 +207,26 @@ class MacroAnalyser:
             logger.debug("pandas-datareader not installed; FRED data unavailable")
 
         return result
+
+    def _fetch_openbb_fred(self, series_id: str) -> Optional[float]:
+        """Fetch latest FRED value via OpenBB (synchronous, called from get_macro_snapshot)."""
+        if not self._openbb:
+            return None
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Already inside an async context — use a new thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(
+                        lambda: asyncio.run(self._openbb.fred_series(series_id, days_back=5))
+                    )
+                    return future.result(timeout=15)
+            else:
+                return loop.run_until_complete(self._openbb.fred_series(series_id, days_back=5))
+        except Exception as exc:
+            logger.debug("OpenBB FRED %s error: %s", series_id, exc)
+            return None
 
     def vix_is_elevated(self, threshold: float = 20.0) -> bool:
         snap = self.get_macro_snapshot()

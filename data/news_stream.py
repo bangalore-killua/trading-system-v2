@@ -62,9 +62,17 @@ class AlpacaNewsStream:
 
         try:
             await self._stream._run_forever()
-        except Exception:
+        except Exception as exc:
             logger.exception("Alpaca NewsDataStream error — will retry via scheduler")
             self._running = False
+            from server.telegram_alerts import notify_failure
+            notify_failure(
+                source="AlpacaNewsStream.start",
+                error_type=type(exc).__name__,
+                cause=str(exc),
+                affects="Real-time Alpaca news feed — RSS aggregator still active, no real-time news until restart",
+                degraded=False,
+            )
 
     async def stop(self) -> None:
         if self._stream:

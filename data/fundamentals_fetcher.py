@@ -48,7 +48,12 @@ def _mktcap_to_bucket(mktcap: Optional[float]) -> str:
 
 
 class FundamentalsFetcher:
-    """Fetches fundamental data for a symbol using EDGAR primary, FMP fallback."""
+    """Fetches fundamental data. Source priority: EDGAR → OpenBB/FMP → direct FMP.
+
+    EDGAR   — free, direct from SEC XBRL, unlimited, covers only US-listed companies
+    OpenBB  — unified FMP wrapper; adds analyst estimates + EPS revisions EDGAR lacks
+    FMP     — direct fallback when OpenBB is unavailable (250 req/day free tier)
+    """
 
     EDGAR_COMPANY_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
     FMP_PROFILE_URL = "https://financialmodelingprep.com/api/v3/profile/{symbol}?apikey={key}"
@@ -58,9 +63,11 @@ class FundamentalsFetcher:
         self,
         fmp_api_key: Optional[str] = None,
         cache_ttl_hours: int = 168,  # 1 week
+        openbb_provider=None,        # data.openbb_provider.OpenBBProvider
     ):
         self._fmp_key = fmp_api_key or os.environ.get("FMP_API_KEY", "")
         self._cache_ttl = timedelta(hours=cache_ttl_hours)
+        self._openbb = openbb_provider
         # symbol → {data dict, fetched_at}
         self._cache: Dict[str, dict] = {}
         # CIK lookup (populated from EDGAR company_tickers.json)
@@ -87,25 +94,57 @@ class FundamentalsFetcher:
         return entry["data"]
 
     async def fetch(self, symbol: str) -> Optional[Dict]:
-        """Fetch fundamentals for one symbol. Tries EDGAR first, FMP fallback."""
-        # Return cache if fresh
+        """Fetch fundamentals for one symbol.
+
+        Priority: EDGAR → OpenBB/FMP → direct FMP.
+        Each tier fires a notify_failure() Telegram alert if it degrades.
+        """
         cached = self.get_cached(symbol)
         if cached:
             return cached
 
+        # Tier 1: SEC EDGAR (free, unlimited, US-listed only)
         data = await self._fetch_edgar(symbol)
+        if data is None:
+            logger.debug("Fundamentals: EDGAR miss for %s — trying OpenBB", symbol)
 
+        # Tier 2: OpenBB (FMP via unified SDK, adds analyst estimates EDGAR lacks)
+        if data is None and self._openbb:
+            try:
+                data = await self._openbb.fundamentals(symbol)
+            except Exception as exc:
+                logger.debug("OpenBB fundamentals error for %s: %s", symbol, exc)
+                from server.telegram_alerts import notify_failure
+                notify_failure(
+                    source=f"FundamentalsFetcher._fetch_openbb({symbol})",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects=f"Fundamentals tier-2 for {symbol} — falling back to direct FMP",
+                )
+
+        # Tier 3: direct FMP (250 req/day free tier)
         if data is None and self._fmp_key:
             data = await self._fetch_fmp(symbol)
 
         if data:
             self._cache[symbol] = {"data": data, "fetched_at": datetime.utcnow()}
             logger.debug(
-                "Fundamentals for %s: P/E=%.1f ROE=%.2f rev_growth=%.2f%%",
+                "Fundamentals for %s: P/E=%s ROE=%s rev_growth=%s",
                 symbol,
-                data.get("pe_ratio") or 0,
-                data.get("roe") or 0,
-                data.get("revenue_growth_yoy") or 0,
+                data.get("pe_ratio"),
+                data.get("roe"),
+                data.get("revenue_growth_yoy"),
+            )
+        else:
+            logger.warning(
+                "Fundamentals: all sources failed for %s — no data cached", symbol
+            )
+            from server.telegram_alerts import notify_failure
+            notify_failure(
+                source=f"FundamentalsFetcher.fetch({symbol})",
+                error_type="AllSourcesFailed",
+                cause="EDGAR, OpenBB, and FMP all returned no data",
+                affects=f"P/E, ROE, debt/equity, analyst estimates for {symbol} — features will be None",
             )
 
         return data
@@ -130,6 +169,13 @@ class FundamentalsFetcher:
 
         except Exception as exc:
             logger.debug("EDGAR fundamentals error for %s: %s", symbol, exc)
+            from server.telegram_alerts import notify_failure
+            notify_failure(
+                source=f"FundamentalsFetcher._fetch_edgar({symbol})",
+                error_type=type(exc).__name__,
+                cause=str(exc),
+                affects=f"SEC EDGAR fundamentals for {symbol} — trying OpenBB/FMP next",
+            )
             return None
 
     def _parse_edgar_facts(self, facts: dict) -> Dict:

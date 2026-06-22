@@ -52,7 +52,7 @@ class ArticleRecord:
 
 
 class NewsAggregator:
-    """Polls all 39 RSS sources, runs NLP, and feeds HOT_UNIVERSE."""
+    """Polls all 39 RSS sources + OpenBB company news, runs NLP, feeds HOT_UNIVERSE."""
 
     def __init__(
         self,
@@ -64,6 +64,8 @@ class NewsAggregator:
         sentiment_threshold: float = 0.70,
         max_article_age_hours: int = 72,
         sources: Optional[List[NewsSource]] = None,
+        openbb_provider=None,       # data.openbb_provider.OpenBBProvider
+        watchlist: Optional[List[str]] = None,  # static symbols for OpenBB news
     ):
         self._hot_universe = hot_universe
         self._threat_clf = threat_classifier
@@ -73,6 +75,8 @@ class NewsAggregator:
         self._sentiment_threshold = sentiment_threshold
         self._max_age = timedelta(hours=max_article_age_hours)
         self._sources = sources or ALL_SOURCES
+        self._openbb = openbb_provider
+        self._watchlist = watchlist or []
         self._running = False
 
         # Dedup: fingerprint (url-or-title hash) → published_at
@@ -97,20 +101,25 @@ class NewsAggregator:
         self._running = False
 
     async def _fetch_all_sources(self) -> None:
-        """Fetch all sources concurrently with a semaphore to cap parallelism."""
-        sem = asyncio.Semaphore(10)  # max 10 concurrent HTTP requests
+        """Fetch RSS sources + OpenBB company news concurrently, run NLP, feed HOT_UNIVERSE."""
+        sem = asyncio.Semaphore(10)
 
         async def bounded_fetch(source: NewsSource) -> List[dict]:
             async with sem:
                 return await self._fetch_source(source)
 
-        results = await asyncio.gather(
+        rss_task = asyncio.gather(
             *[bounded_fetch(s) for s in self._sources],
             return_exceptions=True,
         )
+        openbb_task = self._fetch_openbb_company_news()
+
+        rss_results, openbb_articles = await asyncio.gather(rss_task, openbb_task)
 
         new_articles: List[ArticleRecord] = []
-        for source, entries in zip(self._sources, results):
+
+        # RSS
+        for source, entries in zip(self._sources, rss_results):
             if isinstance(entries, Exception):
                 logger.debug("Source %s failed: %s", source.name, entries)
                 continue
@@ -119,16 +128,71 @@ class NewsAggregator:
                 if article:
                     new_articles.append(article)
 
+        # OpenBB company news (already ArticleRecord objects)
+        new_articles.extend(openbb_articles)
+
         if not new_articles:
             return
 
-        logger.debug("NewsAggregator: %d new articles this cycle", len(new_articles))
+        logger.debug(
+            "NewsAggregator: %d new articles this cycle (%d from OpenBB)",
+            len(new_articles),
+            len(openbb_articles),
+        )
 
-        # Process NLP in batches (sentiment model is slow; batch for GPU efficiency)
         await self._process_articles(new_articles)
-
-        # Clean up old articles and seen fingerprints
         self._evict_stale()
+
+    async def _fetch_openbb_company_news(self) -> List[ArticleRecord]:
+        """Fetch company-specific news from OpenBB for active + watchlist symbols.
+
+        Queries HOT_UNIVERSE active symbols plus the static watchlist.
+        Filters to the last 24h and deduplicates against already-seen fingerprints.
+        Fires notify_failure() if OpenBB news fetch fails.
+        """
+        if not self._openbb:
+            return []
+
+        active = list(self._hot_universe.get_active_symbols()) if self._hot_universe else []
+        symbols = list(dict.fromkeys(self._watchlist + active))  # dedup, preserve order
+        if not symbols:
+            return []
+
+        try:
+            raw = await self._openbb.company_news(
+                symbols=symbols[:30],  # cap to avoid hammering FMP quota
+                limit_per_symbol=5,
+                hours_back=24,
+            )
+        except Exception as exc:
+            logger.debug("OpenBB company news fetch error: %s", exc)
+            from server.telegram_alerts import notify_failure
+            notify_failure(
+                source="NewsAggregator._fetch_openbb_company_news",
+                error_type=type(exc).__name__,
+                cause=str(exc),
+                affects="Company-specific news enrichment — RSS feeds unaffected",
+            )
+            return []
+
+        articles: List[ArticleRecord] = []
+        for item in raw:
+            title = item.get("title", "").strip()
+            url = item.get("url", "")
+            if not title:
+                continue
+            fingerprint = hashlib.md5((url or title).encode()).hexdigest()
+            if fingerprint in self._seen:
+                continue
+            pub = item.get("published_utc") or datetime.utcnow()
+            self._seen[fingerprint] = pub
+            articles.append(ArticleRecord(
+                url=url,
+                title=title,
+                source_name="OpenBB/FMP",
+                published_at=pub,
+            ))
+        return articles
 
     async def _fetch_source(self, source: NewsSource) -> List[dict]:
         """Fetch and parse one RSS source. Returns raw feedparser entry dicts."""
