@@ -33,16 +33,16 @@ pandas-datareader==0.10.0          # FRED macro data — PyPI only (pydata org, 
 
 # sec-edgar-api — PyPI only (v1.0.6 has no git tag; only 1.0.0 and 1.1.0 tagged)
 # Fork exists as backup: https://github.com/bangalore-killua/trading-system-v2-sec-edgar-api
-sec-edgar-api==1.0.6
+sec-edgar-api==1.1.0
 
-# openbb — installed from our fork @ tag 4.3.2
-# Fork: https://github.com/bangalore-killua/trading-system-v2-openbb
-openbb @ git+https://github.com/bangalore-killua/trading-system-v2-openbb.git@4.3.2
+# openbb — PyPI only (monorepo, pyproject.toml not at root — fork install fails)
+# Fork exists as backup: https://github.com/bangalore-killua/trading-system-v2-openbb
+openbb==4.3.2
 
 # ── Data: Screening ───────────────────────────────────────────────────────────
-# tradingview-screener — PyPI only (v0.3.2 predates the v3.x tag scheme on GitHub)
+# tradingview-screener — PyPI only (v0.3.2 never existed; using latest v3.x)
 # Fork exists as backup: https://github.com/bangalore-killua/trading-system-v2-tradingview-screener
-tradingview-screener==0.3.2
+tradingview-screener==3.2.1
 
 # ── Data: News & Feeds ───────────────────────────────────────────────────────
 # feedparser — installed from our fork @ tag 6.0.11
@@ -54,8 +54,9 @@ httpx==0.28.1                      # Async HTTP client — PyPI (Encode org, sta
 lxml==5.3.0                        # XML parser — PyPI (stable, C extension)
 
 # ── Technical Analysis ────────────────────────────────────────────────────────
-# pandas-ta — PyPI only (original GitHub repo was deleted by author)
-pandas-ta==0.3.14b0
+# pandas-ta — installed separately due to pre-release pip memory issue
+# Install with: pip install "pandas-ta==0.4.71b0" --pre --no-deps
+# pandas-ta==0.4.71b0
 
 # ── NLP & Sentiment ───────────────────────────────────────────────────────────
 # torch, transformers, spacy — Meta/HuggingFace/Explosion, multi-GB, won't disappear
@@ -65,20 +66,17 @@ spacy==3.8.3
 # After install run: python -m spacy download en_core_web_sm
 
 # ── Machine Learning (Phase 3+) ───────────────────────────────────────────────
-# lightgbm — installed from our fork @ tag v4.5.0
-# Fork: https://github.com/bangalore-killua/trading-system-v2-lightgbm
-lightgbm @ git+https://github.com/bangalore-killua/trading-system-v2-lightgbm.git@v4.5.0
+# lightgbm — PyPI only (C++ build required — fork install fails without CMake/compiler)
+# Fork exists as backup: https://github.com/bangalore-killua/trading-system-v2-lightgbm
+lightgbm==4.5.0
 
 scikit-learn==1.6.0                # scikit-learn org, BSD — stable, won't disappear
 
-# pybroker — PyPI only (v1.3.9 has no git tag; upstream max is v1.2.12)
-# Fork exists as backup: https://github.com/bangalore-killua/trading-system-v2-pybroker
-pybroker==1.3.9
 
 # ── Data Processing ───────────────────────────────────────────────────────────
 # pandas, numpy — NumFOCUS, won't disappear
-pandas==2.2.3
-numpy==2.1.3
+pandas==2.3.2
+numpy==2.2.6
 
 # ── Performance Reporting ─────────────────────────────────────────────────────
 # quantstats — installed from our fork @ tag 0.0.62

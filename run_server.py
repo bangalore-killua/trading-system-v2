@@ -248,8 +248,10 @@ async def main() -> None:
     scheduler.alpaca_trader = trader
     scheduler.regime_detector = regime_detector
     scheduler.telegram = telegram
-    scheduler.training_pipeline = training_pipeline  # Phase 3: Sunday retrain job
-    scheduler.options_stream = options_stream        # Phase 4: option quote stream
+    scheduler.training_pipeline = training_pipeline      # Phase 3: Sunday retrain job
+    scheduler.options_stream = options_stream            # Phase 4: option quote stream
+    scheduler.fundamentals_fetcher = fundamentals_fetcher  # weekly Sunday refresh
+    scheduler.db = db                                    # daily performance report
 
     logger.info("Starting trading system...")
     await scheduler.start()
