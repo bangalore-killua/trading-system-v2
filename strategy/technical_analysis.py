@@ -138,13 +138,17 @@ def compute_indicators(df: pd.DataFrame, atr_period: int = 14) -> Dict:
                        "macd_bullish": 0, "macd_bullish_cross": 0, "macd_bearish_cross": 0})
 
     # ── Bollinger Bands ─────────────────────────────────────────────────────
+    # Column names vary by pandas-ta version (0.4.71b0 appends std twice:
+    # "BBU_20_2.0_2.0" instead of "BBU_20_2.0"). Use startswith() lookup.
     bbands = df.ta.bbands(length=20, std=2)
     if bbands is not None and not bbands.empty:
-        bb_upper = float(bbands["BBU_20_2.0"].iloc[-1])
-        bb_lower = float(bbands["BBL_20_2.0"].iloc[-1])
-        bb_mid = float(bbands["BBM_20_2.0"].iloc[-1])
-        bb_width = float(bbands["BBB_20_2.0"].iloc[-1])  # bandwidth
-        bb_pct = float(bbands["BBP_20_2.0"].iloc[-1])    # %B position within bands
+        _bb = {p: next((c for c in bbands.columns if c.startswith(p)), None)
+               for p in ("BBU", "BBL", "BBM", "BBB", "BBP")}
+        bb_upper = float(bbands[_bb["BBU"]].iloc[-1]) if _bb["BBU"] else None
+        bb_lower = float(bbands[_bb["BBL"]].iloc[-1]) if _bb["BBL"] else None
+        bb_mid   = float(bbands[_bb["BBM"]].iloc[-1]) if _bb["BBM"] else None
+        bb_width = float(bbands[_bb["BBB"]].iloc[-1]) if _bb["BBB"] else None  # bandwidth
+        bb_pct   = float(bbands[_bb["BBP"]].iloc[-1]) if _bb["BBP"] else None  # %B
         result["bb_upper"] = bb_upper
         result["bb_lower"] = bb_lower
         result["bb_mid"] = bb_mid

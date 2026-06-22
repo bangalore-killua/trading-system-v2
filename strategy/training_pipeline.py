@@ -66,7 +66,12 @@ class TrainingPipeline:
             sl_multiplier=self._model_cfg.get("triple_barrier_sl_multiplier", 1.5),
             max_holding_days=self._model_cfg.get("triple_barrier_max_days", 10),
         )
-        fetcher = OHLCVFetcher()
+        import os
+        fetcher = OHLCVFetcher(
+            alpaca_api_key=os.environ.get("ALPACA_API_KEY"),
+            alpaca_secret_key=os.environ.get("ALPACA_SECRET_KEY"),
+            alpaca_paper=os.environ.get("ALPACA_PAPER", "true").lower() == "true",
+        )
         scorer = Scorer(config=self._cfg)
 
         bars = int(years * 252)
@@ -74,7 +79,7 @@ class TrainingPipeline:
 
         for symbol in symbols:
             try:
-                df = await fetcher.fetch(symbol, bars=bars)
+                df = await fetcher.get_bars(symbol, bars=bars)
                 if df is None or len(df) < 100:
                     logger.warning("Skipping %s — insufficient data", symbol)
                     continue
@@ -287,6 +292,7 @@ async def _cli_main(args):
         print(f"  WF avg P(win) accuracy: {result.get('avg_high_conf_accuracy')}")
     else:
         print("Training skipped — insufficient data or error (see logs)")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

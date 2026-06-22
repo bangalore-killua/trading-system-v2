@@ -1,14 +1,25 @@
-# Block 1
-# # telegram_alerts.py
-# v3 — Telegram notification system
-# Sends trade alerts, signal changes, and daily digests
-# to your phone via Telegram bot
+# telegram_alerts.py — v4
+# Telegram notification system: trade alerts, failures, and daily digests.
+#
+# Two usage modes:
+#   1. Module-level functions (legacy): send_message(), alert_buy_signal(), etc.
+#   2. TelegramAlerts class (async, used by scheduler and all components):
+#        telegram = TelegramAlerts(token, chat_id)
+#        await telegram.send_message("hello")
+#        await telegram.send_failure(source, error_type, cause, affects)
+#
+# Structured failure notifications — all graceful degradations call notify_failure():
+#   from server.telegram_alerts import notify_failure
+#   notify_failure("FundamentalsFetcher", "ConnectionError", str(e), "fundamentals features")
+# This fires a non-blocking Telegram alert without needing the instance injected.
 
+import asyncio
 import os
 import sys
 import logging as _logging
 import requests
 from datetime import datetime
+from typing import Optional
 from dotenv import load_dotenv
 from colorama import Fore, init
 
@@ -20,6 +31,109 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
+
+
+# ── Async TelegramAlerts class ─────────────────────────────────────────────────
+
+class TelegramAlerts:
+    """Async Telegram notifier used by scheduler and wired components.
+
+    Instantiated once in run_server.py and injected into the scheduler.
+    Also registered as a module-level singleton so any module can call
+    notify_failure() without needing the instance passed to it.
+    """
+
+    def __init__(self, token: str, chat_id: str):
+        self._token = token
+        self._chat_id = chat_id
+        # Register as singleton for notify_failure()
+        configure(self)
+
+    async def send_message(self, text: str, parse_mode: str = "HTML") -> bool:
+        """Send a Telegram message asynchronously (non-blocking)."""
+        if not self._token or not self._chat_id:
+            return False
+        try:
+            import httpx
+            url = f"https://api.telegram.org/bot{self._token}/sendMessage"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(url, json={
+                    "chat_id": self._chat_id,
+                    "text": text,
+                    "parse_mode": parse_mode,
+                })
+            return resp.status_code == 200
+        except Exception as exc:
+            _tg_log.warning("TelegramAlerts.send_message failed: %s", exc)
+            return False
+
+    async def send_failure(
+        self,
+        source: str,
+        error_type: str,
+        cause: str,
+        affects: str,
+        degraded: bool = True,
+    ) -> bool:
+        """Structured failure alert — called on every graceful degradation.
+
+        Args:
+            source:     Module/class name (e.g. "FundamentalsFetcher._fetch_openbb")
+            error_type: Exception class name or short category (e.g. "ConnectionError")
+            cause:      Exception message or human-readable description
+            affects:    What capability is degraded (e.g. "P/E, ROE, analyst estimates")
+            degraded:   True = degraded mode (system continues), False = component stopped
+        """
+        mode = "DEGRADED" if degraded else "STOPPED"
+        text = (
+            f"<b>SYSTEM {mode}</b>\n"
+            f"<code>Source  : {source}</code>\n"
+            f"<code>Type    : {error_type}</code>\n"
+            f"<code>Cause   : {cause[:200]}</code>\n"
+            f"<code>Affects : {affects}</code>\n"
+            f"<code>Time    : {datetime.now().strftime('%H:%M:%S')}</code>"
+        )
+        return await self.send_message(text)
+
+
+# ── Module-level singleton for non-injected callers ───────────────────────────
+
+_instance: Optional[TelegramAlerts] = None
+
+
+def configure(instance: TelegramAlerts) -> None:
+    """Register the active TelegramAlerts instance. Called automatically by __init__."""
+    global _instance
+    _instance = instance
+
+
+def notify_failure(
+    source: str,
+    error_type: str,
+    cause: str,
+    affects: str,
+    degraded: bool = True,
+) -> None:
+    """Fire-and-forget failure notification from any module — sync-safe.
+
+    Schedules a Telegram send without blocking. Safe to call from both
+    sync and async code. Silently does nothing if not configured.
+
+    Usage:
+        from server.telegram_alerts import notify_failure
+        notify_failure("MacroAnalyser._fetch_openbb", "ConnectionError", str(e),
+                       "VIX and yield-spread FRED data — using yfinance fallback")
+    """
+    if _instance is None:
+        return
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_instance.send_failure(source, error_type, cause, affects, degraded))
+        else:
+            loop.run_until_complete(_instance.send_failure(source, error_type, cause, affects, degraded))
+    except Exception:
+        pass
 
 def send_message(text: str, parse_mode: str = "HTML") -> bool:
     """

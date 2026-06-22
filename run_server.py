@@ -50,8 +50,15 @@ async def main() -> None:
     from data.edgar_monitor import EdgarMonitor
     from data.tv_screener import TradingViewScreener
     from data.news_aggregator import NewsAggregator
+    from data.openbb_provider import OpenBBProvider
 
     hot_universe = get_hot_universe(cfg.get("universe", {}).get("hot_universe_ttl_hours"))
+
+    # OpenBB provider — lazy init, all components degrade gracefully if unavailable
+    openbb = OpenBBProvider(
+        pat=os.environ.get("OPENBB_PAT", ""),
+        fmp_api_key=os.environ.get("FMP_API_KEY", ""),
+    )
 
     # ── Instantiate NLP layer ────────────────────────────────────────────────
     from strategy.threat_classifier import ThreatClassifier
@@ -93,11 +100,12 @@ async def main() -> None:
     # Ticker extractor — maps article text to equity symbols for HOT_UNIVERSE
     relevance_engine = NewsRelevanceEngine()
 
-    macro_analyser = MacroAnalyser()
+    macro_analyser = MacroAnalyser(use_fred=True, openbb_provider=openbb)
     regime_detector = RegimeDetector(cfg)
 
     fundamentals_fetcher = FundamentalsFetcher(
         fmp_api_key=os.environ.get("FMP_API_KEY", ""),
+        openbb_provider=openbb,
     )
 
     # YOLOv8 chart pattern detector — returns all-zero until model is trained
@@ -226,6 +234,12 @@ async def main() -> None:
         top_n=universe_cfg.get("tv_screener_top_n", 25),
     )
 
+    wl_cfg = cfg.get("watchlist", {})
+    _static_symbols = (
+        wl_cfg.get("mandatory", []) + wl_cfg.get("screener_picks", []) + wl_cfg.get("manual_additions", [])
+        if isinstance(wl_cfg, dict) else list(wl_cfg)
+    )
+
     news_aggregator = NewsAggregator(
         hot_universe=hot_universe,
         threat_classifier=threat_clf,
@@ -233,6 +247,8 @@ async def main() -> None:
         poll_interval_minutes=cfg.get("news", {}).get("rss_fetch_interval_minutes", 5),
         sentiment_threshold=cfg.get("news", {}).get("sentiment_threshold_buy", 0.70),
         ticker_extractor=relevance_engine.extract_tickers,
+        openbb_provider=openbb,
+        watchlist=_static_symbols,
     )
 
     # ── Start scheduler (blocks until stop()) ───────────────────────────────

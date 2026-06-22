@@ -235,12 +235,19 @@ class TradingScheduler:
     # ── Job implementations ─────────────────────────────────────────────────
 
     async def _fetch_news_rss(self) -> None:
-        """Run the 39-source RSS aggregator cycle."""
+        """Run the 39-source RSS + OpenBB company news aggregator cycle."""
         if self.news_aggregator:
             try:
                 await self.news_aggregator._fetch_all_sources()
-            except Exception:
+            except Exception as exc:
                 logger.exception("news_rss job error")
+                if self.telegram:
+                    await self.telegram.send_failure(
+                        source="TradingScheduler._fetch_news_rss",
+                        error_type=type(exc).__name__,
+                        cause=str(exc),
+                        affects="News sentiment and HOT_UNIVERSE news-event seeding this cycle",
+                    )
 
     async def _monitor_positions(self) -> None:
         """Score all open positions for exit signals."""
@@ -248,8 +255,16 @@ class TradingScheduler:
             return
         try:
             await self.position_manager.monitor_exits()
-        except Exception:
+        except Exception as exc:
             logger.exception("monitor_positions job error")
+            if self.telegram:
+                await self.telegram.send_failure(
+                    source="TradingScheduler._monitor_positions",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects="Exit signal evaluation for ALL open positions — CRITICAL, check manually",
+                    degraded=False,
+                )
 
     async def _score_watchlist(self) -> None:
         """Score all static watchlist symbols and evaluate entries."""
@@ -257,8 +272,15 @@ class TradingScheduler:
             return
         try:
             await self.position_manager.score_watchlist()
-        except Exception:
+        except Exception as exc:
             logger.exception("score_watchlist job error")
+            if self.telegram:
+                await self.telegram.send_failure(
+                    source="TradingScheduler._score_watchlist",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects="Watchlist entry evaluation this cycle — HOT_UNIVERSE events still trigger entries",
+                )
 
     async def _update_regime(self) -> None:
         """Detect current market regime (SPY trend + VIX + breadth).
@@ -278,8 +300,15 @@ class TradingScheduler:
                 if self.position_manager and new_regime in ("LATE_BULL", "EARLY_BEAR"):
                     await self.position_manager.buy_protective_puts_for_regime(new_regime)
                 self._last_regime = new_regime
-        except Exception:
+        except Exception as exc:
             logger.exception("update_regime job error")
+            if self.telegram:
+                await self.telegram.send_failure(
+                    source="TradingScheduler._update_regime",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects="Market regime detection — using last known regime until next 4h cycle",
+                )
 
     async def _refresh_fundamentals(self) -> None:
         """Weekly fundamental data refresh for all watchlist symbols.
@@ -292,27 +321,37 @@ class TradingScheduler:
             logger.debug("fundamentals_fetcher not wired — skipping refresh")
             return
 
-        watchlist: list = self._cfg.get("watchlist", [])
+        wl_cfg = self._cfg.get("watchlist", {})
+        if isinstance(wl_cfg, dict):
+            watchlist = (
+                wl_cfg.get("mandatory", [])
+                + wl_cfg.get("screener_picks", [])
+                + wl_cfg.get("manual_additions", [])
+            )
+        else:
+            watchlist = list(wl_cfg)
+
         if not watchlist:
+            logger.warning("Fundamentals refresh: watchlist is empty — skipping")
             return
 
         logger.info("Weekly fundamentals refresh: %d symbols", len(watchlist))
-        success = errors = 0
-        for symbol in watchlist:
-            try:
-                await self.fundamentals_fetcher.fetch(symbol)
-                success += 1
-            except Exception:
-                logger.exception("Fundamentals fetch failed for %s", symbol)
-                errors += 1
-
-        logger.info(
-            "Fundamentals refresh complete: %d ok, %d errors", success, errors
-        )
-        if self.telegram:
-            await self.telegram.send_message(
-                f"Fundamentals refreshed: {success} ok, {errors} errors"
-            )
+        try:
+            await self.fundamentals_fetcher.prefetch_watchlist(watchlist)
+            logger.info("Fundamentals refresh complete for %d symbols", len(watchlist))
+            if self.telegram:
+                await self.telegram.send_message(
+                    f"Fundamentals refreshed: {len(watchlist)} symbols OK"
+                )
+        except Exception as exc:
+            logger.exception("Fundamentals refresh failed")
+            if self.telegram:
+                await self.telegram.send_failure(
+                    source="TradingScheduler._refresh_fundamentals",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects="Weekly P/E, ROE, analyst estimates cache — stale data until next Sunday",
+                )
 
     async def _retrain_meta_model(self) -> None:
         """Sunday 6am: retrain LightGBM on live paper trade labels.
@@ -341,8 +380,15 @@ class TradingScheduler:
                     )
             else:
                 logger.info("Retrain skipped — insufficient labeled samples")
-        except Exception:
+        except Exception as exc:
             logger.exception("Meta-model retrain job failed")
+            if self.telegram:
+                await self.telegram.send_failure(
+                    source="TradingScheduler._retrain_meta_model",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects="LightGBM P(win) model — continues with previous model until fixed",
+                )
 
     async def _monitor_options(self) -> None:
         """Check open option positions for stop-loss, take-profit, and DTE close."""
@@ -350,8 +396,15 @@ class TradingScheduler:
             return
         try:
             await self.position_manager.monitor_option_exits()
-        except Exception:
+        except Exception as exc:
             logger.exception("monitor_options job error")
+            if self.telegram:
+                await self.telegram.send_failure(
+                    source="TradingScheduler._monitor_options",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects="Option position stop-loss and expiry management",
+                )
 
     async def _refresh_screener(self) -> None:
         """Weekly screener picks refresh — feeds HOT_UNIVERSE with top movers.
@@ -388,8 +441,15 @@ class TradingScheduler:
                     f"Weekly screener refresh: {added} symbols queued\n"
                     f"Top picks: {', '.join(top)}"
                 )
-        except Exception:
+        except Exception as exc:
             logger.exception("Screener refresh failed")
+            if self.telegram:
+                await self.telegram.send_failure(
+                    source="TradingScheduler._refresh_screener",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects="Weekly HOT_UNIVERSE pre-seeding — intraday screener still runs normally",
+                )
 
     async def _generate_performance_report(self) -> None:
         """Generate daily quantstats HTML tearsheet after market close (4:30pm)."""
@@ -438,8 +498,15 @@ class TradingScheduler:
                     f"Sharpe       : {sharpe:.2f}\n"
                     f"Max drawdown : {max_dd:.1%}"
                 )
-        except Exception:
+        except Exception as exc:
             logger.exception("Performance report generation failed")
+            if self.telegram:
+                await self.telegram.send_failure(
+                    source="TradingScheduler._generate_performance_report",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects="Daily HTML tearsheet and performance summary message",
+                )
 
     def _on_hot_symbol(self, symbol: str, source: str) -> None:
         """Callback fired by HOT_UNIVERSE when a new symbol enters.
@@ -464,5 +531,12 @@ class TradingScheduler:
             return
         try:
             await self.position_manager.evaluate_entry(symbol, source=source)
-        except Exception:
+        except Exception as exc:
             logger.exception("Hot entry eval error for %s", symbol)
+            if self.telegram:
+                await self.telegram.send_failure(
+                    source=f"TradingScheduler._on_hot_symbol({symbol})",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects=f"Entry evaluation for {symbol} triggered by {source} — symbol skipped this event",
+                )

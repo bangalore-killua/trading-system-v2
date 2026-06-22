@@ -25,9 +25,7 @@ alpaca-py @ git+https://github.com/bangalore-killua/trading-system-v2-alpaca-py.
 APScheduler==3.11.0
 
 # ── Data: Price & Fundamentals ────────────────────────────────────────────────
-# yfinance — installed from our fork @ tag 0.2.51
-# Fork: https://github.com/bangalore-killua/trading-system-v2-yfinance
-yfinance @ git+https://github.com/bangalore-killua/trading-system-v2-yfinance.git@0.2.51
+yfinance>=1.4.1                    # Official PyPI — 1.4.x fixes Yahoo Finance empty-response errors
 
 pandas-datareader==0.10.0          # FRED macro data — PyPI only (pydata org, stable)
 
