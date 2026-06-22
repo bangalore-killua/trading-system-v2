@@ -56,6 +56,13 @@ lxml==5.3.0                        # XML parser — PyPI (stable, C extension)
 # Install with: pip install "pandas-ta==0.4.71b0" --pre --no-deps
 # pandas-ta==0.4.71b0
 
+# TA-Lib — installed separately via scripts/setup.ps1 (Step 2) because Windows
+# requires a pre-compiled C wheel. setup.ps1 tries ta-lib-binary first, then
+# falls back to the cgohlke GitHub wheel. Without TA-Lib, cdl_pattern() calls
+# inside pandas-ta return zeros (60 candlestick features will be zero in LightGBM).
+# DO NOT add ta-lib here — pip install fails on Windows without the C headers.
+# ta-lib-binary  # see setup.ps1 Step 2
+
 # ── NLP & Sentiment ───────────────────────────────────────────────────────────
 # torch, transformers, spacy — Meta/HuggingFace/Explosion, multi-GB, won't disappear
 transformers==4.47.1
@@ -70,11 +77,11 @@ lightgbm==4.5.0
 
 scikit-learn==1.6.0                # scikit-learn org, BSD — stable, won't disappear
 
-
 # ── Data Processing ───────────────────────────────────────────────────────────
 # pandas, numpy — NumFOCUS, won't disappear
 pandas==2.3.2
 numpy==2.2.6
+pyarrow>=24.0.0                    # Parquet I/O for training_pipeline intermediate files
 
 # ── Performance Reporting ─────────────────────────────────────────────────────
 # quantstats — installed from our fork @ tag 0.0.62
