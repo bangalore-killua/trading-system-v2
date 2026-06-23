@@ -1,8 +1,35 @@
 # trading-system-v2
 
-An event-driven, ML-augmented US equity trading system built on Alpaca paper/live trading.
-Greenfield rebuild of [TradingSystem](../TradingSystem) with a 3-layer universe, LightGBM
-meta-model, 39-source news pipeline, and properly wired signal basket.
+Private algorithmic trading system. Personal use on private VPS only. AGPL-3.0.
+
+## What it does
+
+A fully automated equity trading pipeline:
+
+1. **Universe discovery** — 4 methods run weekly: knowledge graph (SEC 10-K supply-chain), theme baskets (10 ETF-expanded baskets), momentum expansion (>40% 3m return), user seeds
+2. **Factor scoring** — 5 percentile-based scores per stock (momentum, quality, technical, valuation, news) become LightGBM input features
+3. **LightGBM Scorecard** — 135 features, triple-barrier labels, walk-forward CV. Outputs P(win) per stock. Top 30 become the weekly watchlist
+4. **Daily scoring** — full feature set per watchlist stock every market day
+5. **ML + LLM Consensus** — LightGBM P(win) + Groq Llama 3.3 70B → STRONG_BUY / BUY / CONFLICT / SKIP + size multiplier
+6. **Alpaca execution** — paper or live trading via Alpaca broker API
+7. **News intelligence** — 39 RSS feeds + SEC EDGAR, FinBERT, sentence-transformers clustering, Groq portfolio analysis
+8. **Feedback loop** — daily top-mover collection, monthly 4-filter retrain, ChromaDB RAG
+9. **Bloomberg-style terminal** — `/terminal` web page with macro strip, options chain, YOLOv8 patterns, Cytoscape knowledge graph, AI agents
+
+## Quick start
+
+```bash
+cp .env.example .env          # fill in API keys
+./venv/Scripts/activate       # Windows
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+alembic upgrade head
+python run_server.py          # → http://localhost:8000/dashboard
+```
+
+Key env vars: `ALPACA_API_KEY`, `ALPACA_API_SECRET`, `GROQ_API_KEY` (free at console.groq.com), `DATABASE_URL`
+
+See [docs/architecture.md](docs/architecture.md) for the full system diagram and pipeline details.
 
 ---
 
