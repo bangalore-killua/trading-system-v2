@@ -342,3 +342,59 @@ class Scorer:
             )
         except Exception:
             logger.exception("Failed to log feature vector for %s", symbol)
+
+
+class StockScorer:
+    """High-level scoring facade used by server/api.py.
+
+    Reads pre-computed signals from the database (written by the scoring cycle
+    in position_manager.py) and exposes them in a format the dashboard expects.
+    Falls back to a stub dict when the database is unavailable or the symbol
+    has no stored signal yet.
+    """
+
+    def score(self, symbol: str) -> dict:
+        """Return the latest stored signal dict for *symbol*, or a stub."""
+        try:
+            from database import get_db
+            db = get_db()
+            signals = db.get_latest_signals()
+            for s in signals:
+                if s.get("symbol", "").upper() == symbol.upper():
+                    return s
+        except Exception:
+            logger.debug("StockScorer: DB unavailable for %s", symbol)
+
+        # Stub — returned when DB is down or symbol has no history
+        return {
+            "symbol": symbol.upper(),
+            "signal": "HOLD",
+            "signal_label": "HOLD",
+            "normalised_score": 0,
+            "overall_display": "N/A",
+            "conviction": "INSUFFICIENT",
+            "bundle_name": "Unknown",
+            "bundle_emoji": "",
+            "bundle_id": "",
+            "position_pct": 0,
+            "price": 0,
+            "trade_id": None,
+            "timestamp": None,
+        }
+
+    def format_scorecard_dashboard(self, sc: dict) -> dict:
+        """Format a signal dict for the dashboard scorecard display."""
+        return {
+            "symbol":           sc.get("symbol", ""),
+            "signal":           sc.get("signal", sc.get("signal_label", "HOLD")),
+            "score":            sc.get("normalised_score", 0),
+            "overall_display":  sc.get("overall_display", "N/A"),
+            "conviction":       sc.get("conviction", "INSUFFICIENT"),
+            "bundle_name":      sc.get("bundle_name", ""),
+            "bundle_emoji":     sc.get("bundle_emoji", ""),
+            "asset_class":      sc.get("bundle_id", sc.get("asset_class", "")),
+            "position_pct":     sc.get("position_pct", 0),
+            "price":            sc.get("price", 0),
+            "trade_id":         sc.get("trade_id"),
+            "timestamp":        sc.get("timestamp"),
+        }
