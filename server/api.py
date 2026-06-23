@@ -1562,6 +1562,72 @@ def get_regime():
                 "data": {"regime": "UNKNOWN", "allowed_entry": False}}
 
 
+# ── News Intelligence ─────────────────────────────────────────
+
+@app.get("/api/news/analysis")
+async def get_news_analysis(tickers: str = "", hours: int = 24, limit: int = 30):
+    """Cross-article correlation + Groq portfolio-aware impact analysis.
+
+    Query params:
+      tickers — comma-separated tickers to treat as portfolio (e.g. AAPL,MSFT,NVDA)
+      hours   — look back this many hours for recent articles (default 24)
+      limit   — max articles to analyse (default 30)
+
+    Returns: {clusters, ticker_map, impact, cross_correlations, summary}
+    """
+    try:
+        from data.news_aggregator import get_news_aggregator
+        from data.news_intelligence import get_news_intelligence_engine
+
+        agg = get_news_aggregator()
+        portfolio = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+        raw_articles = agg.get_recent_articles(hours=hours)[:limit]
+
+        articles = [
+            {
+                "title":         a.title,
+                "summary":       getattr(a, "summary", a.title),
+                "url":           a.url,
+                "finbert_score": a.sentiment,
+                "tickers":       a.tickers,
+            }
+            for a in raw_articles
+        ]
+
+        engine = get_news_intelligence_engine()
+        result = await engine.analyse(articles, portfolio_holdings=portfolio)
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {}}
+
+
+# ── Knowledge Graph ────────────────────────────────────────────
+
+@app.get("/api/graph/{symbol}")
+def get_knowledge_graph(symbol: str, hops: int = 1):
+    """Return Cytoscape.js-compatible knowledge graph for a symbol.
+
+    Query params:
+      symbol — the anchor ticker (e.g. NVDA)
+      hops   — how many relationship hops to expand (default 1, max 2)
+
+    Returns: {nodes: [{data:{id,label}}], edges: [{data:{source,target,rel_type}}]}
+    """
+    try:
+        from data.knowledge_graph import get_knowledge_graph as get_kg
+        kg = get_kg()
+        graph_json = kg.get_graph_json(symbol.upper(), hops=min(hops, 2))
+        return {
+            "status": "ok",
+            "symbol": symbol.upper(),
+            "node_count": len(graph_json["nodes"]),
+            "edge_count": len(graph_json["edges"]),
+            "data": graph_json,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {"nodes": [], "edges": []}}
+
+
 # ── Dashboard ─────────────────────────────────────────────────
 
 @app.get("/dashboard")
