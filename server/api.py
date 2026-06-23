@@ -1628,8 +1628,199 @@ def get_knowledge_graph(symbol: str, hops: int = 1):
         return {"status": "error", "message": str(e), "data": {"nodes": [], "edges": []}}
 
 
+# ── Fincept Data Endpoints ────────────────────────────────────
+
+@app.get("/api/macro/snapshot")
+def get_macro_snapshot():
+    """FRED macro snapshot: GDP, CPI, UNRATE, DFF, 10Y yield."""
+    try:
+        from data.fincept.fred_data import get_macro_snapshot
+        return {"status": "ok", "data": get_macro_snapshot()}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {}}
+
+
+@app.get("/api/macro/fred/{series_id}")
+def get_fred_series(series_id: str, limit: int = 24):
+    """Arbitrary FRED series — last N observations."""
+    try:
+        from data.fincept.fred_data import get_series
+        data = get_series(series_id.upper(), limit=limit)
+        return {"status": "ok", "series_id": series_id.upper(), "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": []}
+
+
+@app.get("/api/global/indices")
+def get_global_indices():
+    """Global equity indices + ETF quotes (SPY, QQQ, DIA, GLD, NQ, DAX, Nikkei)."""
+    try:
+        from data.fincept.yfinance_data import get_batch_quotes
+        symbols = ["SPY", "QQQ", "DIA", "GLD", "^NQ=F", "^GDAXI", "^N225", "^VIX", "^TNX"]
+        data = get_batch_quotes(symbols)
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {}}
+
+
+@app.get("/api/options/{symbol}")
+def get_options(symbol: str, expiry: str = ""):
+    """Options chain + estimated Greeks for a symbol."""
+    try:
+        from data.fincept.cboe_data import get_options_chain, get_iv_skew
+        chain = get_options_chain(symbol.upper(), expiry or None)
+        skew  = get_iv_skew(symbol.upper(), expiry or None)
+        return {"status": "ok", "data": {**chain, "iv_skew": skew}}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {}}
+
+
+@app.get("/api/cot")
+def get_cot():
+    """COT report snapshot for key futures contracts."""
+    try:
+        from data.fincept.cftc_data import get_cot_snapshot
+        return {"status": "ok", "data": get_cot_snapshot()}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": []}
+
+
+@app.get("/api/sec/filings/{symbol}")
+def get_sec_filings(symbol: str, forms: str = "10-K,10-Q,8-K,4", limit: int = 10):
+    """Recent SEC filings + insider Form 4 trades for a symbol."""
+    try:
+        from data.fincept.sec_data import get_filings, get_insider_trading
+        filings = get_filings(symbol.upper(), forms=forms, limit=limit)
+        insider = get_insider_trading(symbol.upper(), days_back=90)
+        return {
+            "status": "ok",
+            "symbol": symbol.upper(),
+            "data": {"filings": filings, "insider_trades": insider},
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {}}
+
+
+@app.get("/api/patterns/{symbol}")
+def get_chart_patterns(symbol: str, period: str = "3mo"):
+    """YOLOv8 detected chart patterns for a symbol.
+
+    Returns list of {pattern, confidence, direction, implication, bbox}.
+    Returns empty list if model not loaded or chart unavailable.
+    """
+    try:
+        from strategy.pattern_api import detect_patterns
+        patterns = detect_patterns(symbol.upper(), period=period)
+        return {
+            "status": "ok",
+            "symbol": symbol.upper(),
+            "period": period,
+            "data":   patterns,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": []}
+
+
+@app.get("/api/ai/agent/{agent_name}")
+async def run_ai_agent(agent_name: str):
+    """Run a Fincept AI agent (portfolio_manager / risk_quant / signal_scientist).
+
+    Passes current portfolio state + macro snapshot + top signals as context.
+    Returns markdown-formatted report from Groq Llama 3.3 70B.
+    """
+    try:
+        from data.fincept.agents.base import get_agent_factory
+        from data.fincept.fred_data import get_macro_snapshot
+
+        agents = get_agent_factory()
+        if agent_name not in agents:
+            return {
+                "status": "error",
+                "message": f"Unknown agent '{agent_name}'. Available: {list(agents.keys())}",
+            }
+
+        # Build context from current system state
+        context: dict = {"regime": "NEUTRAL", "portfolio": [], "top_signals": [], "macro": {}}
+        try:
+            context["macro"] = get_macro_snapshot()
+        except Exception:
+            pass
+        try:
+            context["portfolio"] = [
+                p for p in (db.get_positions() if db else [])
+            ]
+        except Exception:
+            pass
+        try:
+            context["top_signals"] = [
+                s for s in (db.get_latest_signals()[:15] if db else [])
+            ]
+        except Exception:
+            pass
+        try:
+            if regime_detector:
+                reg = regime_detector.get_current_regime()
+                context["regime"] = reg.name if reg else "NEUTRAL"
+        except Exception:
+            pass
+
+        # Run agent (synchronous Groq call, wrapped in executor)
+        import asyncio
+        loop = asyncio.get_event_loop()
+        agent = agents[agent_name]
+        report = await loop.run_in_executor(None, lambda: agent.run(context))
+        return {"status": "ok", "agent": agent_name, "report": report}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "report": ""}
+
+
+@app.get("/api/ohlcv/{symbol}")
+def get_ohlcv(symbol: str, period: str = "3mo"):
+    """OHLCV price history in Lightweight Charts format (time, open, high, low, close)."""
+    try:
+        from data.fincept.yfinance_data import get_ohlcv
+        df = get_ohlcv(symbol.upper(), period=period)
+        if df is None or df.empty:
+            return {"status": "ok", "data": []}
+        bars = []
+        for ts, row in df.iterrows():
+            # Lightweight Charts expects Unix timestamp seconds
+            bars.append({
+                "time":  int(ts.timestamp()),
+                "open":  round(float(row["Open"]), 4),
+                "high":  round(float(row["High"]), 4),
+                "low":   round(float(row["Low"]), 4),
+                "close": round(float(row["Close"]), 4),
+            })
+        return {"status": "ok", "symbol": symbol.upper(), "data": bars}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": []}
+
+
+@app.get("/api/stock/{symbol}")
+def get_stock_detail(symbol: str):
+    """Full stock detail: quote + fundamentals + recent news."""
+    try:
+        from data.fincept.yfinance_data import get_quote, get_info, get_news
+        quote = get_quote(symbol.upper())
+        info  = get_info(symbol.upper())
+        news  = get_news(symbol.upper(), max_items=5)
+        return {
+            "status": "ok",
+            "symbol": symbol.upper(),
+            "data": {"quote": quote, "fundamentals": info, "news": news},
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {}}
+
+
 # ── Dashboard ─────────────────────────────────────────────────
 
 @app.get("/dashboard")
 def serve_dashboard():
     return FileResponse("dashboard/index.html")
+
+
+@app.get("/terminal")
+def serve_terminal():
+    return FileResponse("dashboard/terminal.html")
