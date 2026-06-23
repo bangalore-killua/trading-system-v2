@@ -175,7 +175,7 @@
   },
   "model": {
     "meta_model_enabled": true,
-    "meta_model_path": "models/lgbm_meta.pkl",
+    "meta_model_path": "models/scorecard_meta.json",
     "meta_model_confidence_high": 0.65,
     "meta_model_confidence_low": 0.52,
     "retrain_min_samples": 500,
@@ -189,7 +189,7 @@
       "learning_rate": 0.05,
       "max_depth": 6,
       "num_leaves": 31,
-      "min_child_samples": 20,
+      "min_child_samples": 50,
       "subsample": 0.8,
       "subsample_freq": 1,
       "colsample_bytree": 0.8,

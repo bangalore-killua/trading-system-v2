@@ -1,0 +1,17 @@
+{
+  "active_version": 1,
+  "versions": {
+    "v1": {
+      "file": "scorecard_v1.pkl",
+      "trained_at": "2026-06-22T23:10:53.710459",
+      "n_samples": 12040,
+      "n_features": 130,
+      "symbols": ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA", "AMD", "CRM", "NFLX"],
+      "train_accuracy": 0.9402,
+      "wf_avg_accuracy": null,
+      "retired_at": null
+    }
+  },
+  "rollback_available": false,
+  "keep_last_n_versions": 3
+}
