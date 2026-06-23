@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>trading-system-v2 / terminal</title>
+
+<!-- Lightweight Charts v5 -->
+<script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
+
+<!-- Cytoscape.js for knowledge graph spider web -->
+<script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+
+<style>
+/* ── CSS Variables (same dark palette as index.html) ─────────── */
+:root {
+  --bg-primary:   #0a0a0f;
+  --bg-secondary: #12121a;
+  --bg-card:      #1a1a28;
+  --bg-hover:     #22223a;
+  --accent:       #6366f1;
+  --accent-dim:   #4338ca;
+  --green:        #00ff88;
+  --red:          #ff4444;
+  --yellow:       #fbbf24;
+  --text-primary: #e2e8f0;
+  --text-dim:     #64748b;
+  --border:       #2d2d4a;
+  --font:         'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono:         'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  font-size: 13px;
+}
+
+/* ── Top bar ─────────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  height: 48px;
+  position: sticky; top: 0; z-index: 100;
+}
+header h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.5px; color: var(--accent); }
+nav a {
+  color: var(--text-dim);
+  text-decoration: none;
+  margin-left: 20px;
+  font-size: 13px;
+  transition: color 0.2s;
+}
+nav a:hover, nav a.active { color: var(--text-primary); }
+#last-updated { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+
+/* ── Macro strip ─────────────────────────────────────────────── */
+.macro-strip {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  display: flex; gap: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.macro-pill {
+  flex: 0 0 auto;
+  padding: 8px 18px;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.macro-pill label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+.macro-pill span  { font-size: 14px; font-weight: 600; font-family: var(--mono); }
+.macro-pill .sub  { font-size: 10px; color: var(--text-dim); }
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+
+/* ── Main layout ─────────────────────────────────────────────── */
+.main { display: flex; flex-direction: column; gap: 0; }
+
+/* ── Sections ────────────────────────────────────────────────── */
+section { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 12px; }
+
+/* ── Symbol search ───────────────────────────────────────────── */
+.search-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.search-row input {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 14px;
+  outline: none;
+}
+.search-row input:focus { border-color: var(--accent); }
+.btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+.btn:hover { background: var(--accent-dim); }
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+.btn-ghost:hover, .btn-ghost.active { border-color: var(--accent); color: var(--text-primary); background: var(--bg-hover); }
+
+/* ── Tabs ────────────────────────────────────────────────────── */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.tab {
+  padding: 7px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  transition: all 0.2s;
+  user-select: none;
+}
+.tab:hover { color: var(--text-primary); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ── Cards + tables ──────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 10px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; padding: 6px 10px; color: var(--text-dim); font-size: 11px; border-bottom: 1px solid var(--border); font-weight: 500; }
+td { padding: 7px 10px; border-bottom: 1px solid rgba(45,45,74,0.5); }
+tr:hover td { background: var(--bg-hover); }
+
+/* ── Signal badges ───────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.badge-bull { background: rgba(0,255,136,0.12); color: var(--green); }
+.badge-bear { background: rgba(255,68,68,0.12); color: var(--red); }
+.badge-neutral { background: rgba(100,116,139,0.2); color: var(--text-dim); }
+.badge-strong { background: rgba(99,102,241,0.15); color: var(--accent); }
+
+/* ── Two-column layout ───────────────────────────────────────── */
+.two-col { display: grid; grid-template-columns: 55fr 45fr; gap: 16px; }
+
+/* ── Chart container ─────────────────────────────────────────── */
+#chart-container {
+  height: 360px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+/* ── Knowledge graph (Cytoscape) ─────────────────────────────── */
+#cy-container {
+  height: 420px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+/* ── FRED sparklines ─────────────────────────────────────────── */
+.fred-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.fred-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.fred-card .value { font-size: 22px; font-weight: 700; font-family: var(--mono); color: var(--text-primary); }
+.fred-card .label { font-size: 10px; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; }
+.fred-sparkline { height: 60px; }
+
+/* ── AI agent panel ──────────────────────────────────────────── */
+.agent-btns { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+#agent-report {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  min-height: 120px;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+}
+
+/* ── Patterns grid ───────────────────────────────────────────── */
+.patterns-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.pattern-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.pattern-name { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+.pattern-conf { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+.pattern-impl { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+
+/* ── Economic calendar ───────────────────────────────────────── */
+.cal-event { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); align-items: center; }
+.cal-time { font-family: var(--mono); font-size: 11px; color: var(--text-dim); min-width: 80px; }
+.cal-impact { min-width: 32px; }
+.cal-title { flex: 1; font-size: 12px; }
+.impact-high   { color: var(--red); font-weight: 700; }
+.impact-medium { color: var(--yellow); }
+.impact-low    { color: var(--text-dim); }
+
+/* ── Loading spinner ─────────────────────────────────────────── */
+.spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-text { color: var(--text-dim); font-size: 12px; }
+
+/* ── Options chain ───────────────────────────────────────────── */
+.options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .two-col { grid-template-columns: 1fr; }
+  .fred-grid { grid-template-columns: repeat(2, 1fr); }
+  .options-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Top bar ──────────────────────────────────────────────── -->
+<header>
+  <h1>trading-system-v2 / terminal</h1>
+  <nav>
+    <a href="/dashboard">Dashboard</a>
+    <a href="/terminal" class="active">Terminal</a>
+  </nav>
+  <span id="last-updated">–</span>
+</header>
+
+<!-- ── Macro strip ───────────────────────────────────────────── -->
+<div class="macro-strip" id="macro-strip">
+  <div class="macro-pill"><label>GDP</label><span id="m-gdp">–</span><span class="sub">Real GDP</span></div>
+  <div class="macro-pill"><label>CPI</label><span id="m-cpi">–</span><span class="sub">YoY</span></div>
+  <div class="macro-pill"><label>Unemployment</label><span id="m-unrate">–</span><span class="sub">Rate</span></div>
+  <div class="macro-pill"><label>Fed Funds</label><span id="m-dff">–</span><span class="sub">Effective</span></div>
+  <div class="macro-pill"><label>10Y Yield</label><span id="m-gs10">–</span><span class="sub">Treasury</span></div>
+  <div class="macro-pill"><label>SPY</label><span id="m-spy">–</span><span class="sub" id="m-spy-chg">–</span></div>
+  <div class="macro-pill"><label>QQQ</label><span id="m-qqq">–</span><span class="sub" id="m-qqq-chg">–</span></div>
+  <div class="macro-pill"><label>GLD</label><span id="m-gld">–</span><span class="sub" id="m-gld-chg">–</span></div>
+  <div class="macro-pill"><label>VIX</label><span id="m-vix">–</span><span class="sub">Volatility</span></div>
+</div>
+
+<div class="main">
+
+<!-- ── Symbol Research ───────────────────────────────────────── -->
+<section>
+  <div class="search-row">
+    <input type="text" id="symbol-input" placeholder="Enter ticker (e.g. NVDA, AAPL, TSLA)" autocomplete="off" spellcheck="false" />
+    <button class="btn" onclick="analyseSymbol()">Analyse</button>
+  </div>
+
+  <div id="symbol-panel" style="display:none">
+    <div class="tabs" id="symbol-tabs">
+      <div class="tab active" onclick="switchTab('overview')">Overview</div>
+      <div class="tab" onclick="switchTab('chart')">Chart + Patterns</div>
+      <div class="tab" onclick="switchTab('options')">Options</div>
+      <div class="tab" onclick="switchTab('fundamentals')">Fundamentals</div>
+      <div class="tab" onclick="switchTab('filings')">Filings</div>
+      <div class="tab" onclick="switchTab('news-tab')">News</div>
+      <div class="tab" onclick="switchTab('graph-tab')">Relations</div>
+      <div class="tab" onclick="switchTab('cot-tab')">COT</div>
+    </div>
+
+    <!-- Overview -->
+    <div class="tab-content active" id="tab-overview">
+      <div id="overview-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+    </div>
+
+    <!-- Chart + Patterns -->
+    <div class="tab-content" id="tab-chart">
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <button class="btn-ghost" onclick="loadChart('1mo')">1M</button>
+        <button class="btn-ghost active" onclick="loadChart('3mo')">3M</button>
+        <button class="btn-ghost" onclick="loadChart('6mo')">6M</button>
+        <button class="btn-ghost" onclick="loadChart('1y')">1Y</button>
+      </div>
+      <div id="chart-container"></div>
+      <h2 style="margin-top:16px;margin-bottom:12px;">Detected Patterns</h2>
+      <div id="patterns-content" class="patterns-grid"><span class="loading-text">Select a symbol and click Analyse</span></div>
+    </div>
+
+    <!-- Options -->
+    <div class="tab-content" id="tab-options">
+      <div id="options-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+    </div>
+
+    <!-- Fundamentals -->
+    <div class="tab-content" id="tab-fundamentals">
+      <div id="fundamentals-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+    </div>
+
+    <!-- Filings -->
+    <div class="tab-content" id="tab-filings">
+      <div id="filings-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+    </div>
+
+    <!-- News -->
+    <div class="tab-content" id="tab-news-tab">
+      <div id="news-articles"></div>
+      <div class="card" style="margin-top:12px;" id="groq-news-card">
+        <div class="card-title">Groq Analysis</div>
+        <div id="groq-news-content"><span class="loading-text">Loads after articles...</span></div>
+      </div>
+    </div>
+
+    <!-- Relations (Knowledge Graph) -->
+    <div class="tab-content" id="tab-graph-tab">
+      <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;">
+        <button class="btn-ghost active" onclick="loadGraph(1)">1 hop</button>
+        <button class="btn-ghost" onclick="loadGraph(2)">2 hops</button>
+        <span style="color:var(--text-dim);font-size:11px;margin-left:8px;">Click nodes to explore</span>
+      </div>
+      <div id="cy-container"></div>
+    </div>
+
+    <!-- COT -->
+    <div class="tab-content" id="tab-cot-tab">
+      <div id="cot-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Two-column: Portfolio + AI Agents ─────────────────────── -->
+<section>
+  <div class="two-col">
+    <div>
+      <h2>Portfolio Analytics</h2>
+      <div class="card">
+        <div class="card-title">Risk Metrics</div>
+        <div id="risk-metrics-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+      </div>
+    </div>
+    <div>
+      <h2>AI Agents</h2>
+      <div class="agent-btns">
+        <button class="btn-ghost" onclick="runAgent('portfolio_manager')">Portfolio Manager</button>
+        <button class="btn-ghost" onclick="runAgent('risk_quant')">Risk Analyst</button>
+        <button class="btn-ghost" onclick="runAgent('signal_scientist')">Signal Scientist</button>
+      </div>
+      <div id="agent-report">Select an agent to generate a report...</div>
+      <div id="agent-timestamp" style="font-size:10px;color:var(--text-dim);margin-top:6px;"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FRED Macro Charts ──────────────────────────────────────── -->
+<section>
+  <h2>FRED Macro</h2>
+  <div class="fred-grid">
+    <div class="fred-card" id="fred-GDP">
+      <div class="label">Real GDP</div>
+      <div class="value" id="fred-GDP-val">–</div>
+      <canvas class="fred-sparkline" id="fred-GDP-chart"></canvas>
+    </div>
+    <div class="fred-card" id="fred-CPIAUCSL">
+      <div class="label">CPI</div>
+      <div class="value" id="fred-CPIAUCSL-val">–</div>
+      <canvas class="fred-sparkline" id="fred-CPIAUCSL-chart"></canvas>
+    </div>
+    <div class="fred-card" id="fred-UNRATE">
+      <div class="label">Unemployment Rate</div>
+      <div class="value" id="fred-UNRATE-val">–</div>
+      <canvas class="fred-sparkline" id="fred-UNRATE-chart"></canvas>
+    </div>
+    <div class="fred-card" id="fred-DFF">
+      <div class="label">Fed Funds Rate</div>
+      <div class="value" id="fred-DFF-val">–</div>
+      <canvas class="fred-sparkline" id="fred-DFF-chart"></canvas>
+    </div>
+  </div>
+</section>
+
+<!-- ── Economic Calendar ─────────────────────────────────────── -->
+<section>
+  <h2>Economic Calendar (next 7 days)</h2>
+  <div id="cal-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+</section>
+
+</div><!-- end .main -->
+
+<script>
+/* ── State ─────────────────────────────────────────────────── */
+let currentSymbol = '';
+let chart = null;
+let cy = null;
+let chartSeries = null;
+
+/* ── Helpers ────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const fmtPct = v => v == null ? '–' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+const fmtNum = v => v == null ? '–' : parseFloat(v).toLocaleString(undefined, {maximumFractionDigits: 2});
+const pctClass = v => v == null ? '' : (v >= 0 ? 'pos' : 'neg');
+
+async function api(path) {
+  try {
+    const res = await fetch(path);
+    return await res.json();
+  } catch(e) {
+    return {status: 'error', message: String(e)};
+  }
+}
+
+/* ── Init ───────────────────────────────────────────────────── */
+window.addEventListener('DOMContentLoaded', () => {
+  loadMacro();
+  loadIndices();
+  loadRiskMetrics();
+  loadFredSparklines();
+  loadCalendar();
+  setInterval(loadMacro, 60000);
+  setInterval(loadIndices, 30000);
+  $('symbol-input').addEventListener('keydown', e => { if (e.key === 'Enter') analyseSymbol(); });
+  updateTimestamp();
+});
+
+function updateTimestamp() {
+  $('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  setTimeout(updateTimestamp, 60000);
+}
+
+/* ── Macro strip ────────────────────────────────────────────── */
+async function loadMacro() {
+  const d = await api('/api/macro/snapshot');
+  if (d.status !== 'ok') return;
+  const snap = d.data;
+  const fields = {GDP:'m-gdp', CPIAUCSL:'m-cpi', UNRATE:'m-unrate', DFF:'m-dff', GS10:'m-gs10'};
+  for (const [key, elId] of Object.entries(fields)) {
+    if (snap[key]) {
+      const el = $(elId);
+      if (el) el.textContent = fmtNum(snap[key].value) + (key !== 'DFF' && key !== 'GS10' ? '%' : '%');
+    }
+  }
+}
+
+async function loadIndices() {
+  const d = await api('/api/global/indices');
+  if (d.status !== 'ok') return;
+  const data = d.data;
+  const map = {SPY:'spy', QQQ:'qqq', GLD:'gld', '^VIX':'vix'};
+  for (const [sym, key] of Object.entries(map)) {
+    const q = data[sym];
+    if (!q) continue;
+    const el = $('m-' + key);
+    const chgEl = $('m-' + key + '-chg');
+    if (el) { el.textContent = '$' + fmtNum(q.price); el.className = pctClass(q.change_pct); }
+    if (chgEl) { chgEl.textContent = fmtPct(q.change_pct); chgEl.className = 'sub ' + pctClass(q.change_pct); }
+  }
+}
+
+/* ── Symbol analysis ────────────────────────────────────────── */
+async function analyseSymbol() {
+  const sym = $('symbol-input').value.trim().toUpperCase();
+  if (!sym) return;
+  currentSymbol = sym;
+  $('symbol-panel').style.display = 'block';
+
+  // Load all tabs in parallel
+  loadOverview(sym);
+  loadChart('3mo');
+  loadPatterns(sym);
+  loadOptions(sym);
+  loadFundamentals(sym);
+  loadFilings(sym);
+  loadSymbolNews(sym);
+  loadGraph(1);
+}
+
+function switchTab(tabId) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  $('tab-' + tabId).classList.add('active');
+}
+
+/* ── Overview tab ───────────────────────────────────────────── */
+async function loadOverview(sym) {
+  $('overview-content').innerHTML = '<span class="loading-text"><span class="spinner"></span>Loading...</span>';
+  const d = await api('/api/stock/' + sym);
+  if (d.status !== 'ok') { $('overview-content').innerHTML = 'Error: ' + (d.message || 'N/A'); return; }
+  const q = d.data.quote || {}, f = d.data.fundamentals || {};
+  const signClass = s => s && s.includes('BUY') ? 'badge-bull' : s === 'SKIP' ? 'badge-bear' : 'badge-neutral';
+  $('overview-content').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;">
+      ${kv('Price', '$' + fmtNum(q.price))}
+      ${kv('Change', fmtPct(q.change_pct), pctClass(q.change_pct))}
+      ${kv('Market Cap', fmtLarge(q.market_cap))}
+      ${kv('52W High', '$' + fmtNum(q['52w_high']))}
+      ${kv('52W Low', '$' + fmtNum(q['52w_low']))}
+      ${kv('Avg Vol 10d', fmtLarge(q.avg_volume_10d))}
+      ${kv('P/E (trailing)', fmtNum(f.pe_trailing))}
+      ${kv('EPS (trailing)', '$' + fmtNum(f.eps_trailing))}
+      ${kv('ROE', f.roe != null ? (f.roe * 100).toFixed(1) + '%' : '–')}
+      ${kv('Profit Margin', f.profit_margin != null ? (f.profit_margin * 100).toFixed(1) + '%' : '–')}
+      ${kv('Beta', fmtNum(q.beta))}
+      ${kv('Sector', f.sector || '–')}
+    </div>
+    <div style="margin-top:12px;font-size:11px;color:var(--text-dim);line-height:1.6;">${(f.description || '').slice(0,400)}${f.description && f.description.length > 400 ? '…' : ''}</div>
+  `;
+}
+
+function kv(label, value, cls='') {
+  return `<div class="card" style="padding:10px"><div class="card-title">${label}</div><div class="value" style="font-size:16px;font-family:var(--mono);font-weight:600${cls ? ';color:var(--' + cls + ')' : ''}">${value}</div></div>`;
+}
+
+function fmtLarge(v) {
+  if (!v) return '–';
+  if (v >= 1e12) return (v/1e12).toFixed(2) + 'T';
+  if (v >= 1e9)  return (v/1e9).toFixed(2) + 'B';
+  if (v >= 1e6)  return (v/1e6).toFixed(2) + 'M';
+  return v.toLocaleString();
+}
+
+/* ── Chart tab ──────────────────────────────────────────────── */
+async function loadChart(period) {
+  document.querySelectorAll('.btn-ghost').forEach(b => {
+    if (['1mo','3mo','6mo','1y'].includes(b.textContent.replace('M','mo').replace('Y','y').toLowerCase())) {
+      b.classList.remove('active');
+    }
+  });
+  if (!currentSymbol) return;
+
+  const el = $('chart-container');
+  el.innerHTML = '';
+
+  try {
+    chart = LightweightCharts.createChart(el, {
+      layout: { background: { color: '#1a1a28' }, textColor: '#64748b' },
+      grid: { vertLines: { color: '#2d2d4a' }, horzLines: { color: '#2d2d4a' } },
+      rightPriceScale: { borderColor: '#2d2d4a' },
+      timeScale: { borderColor: '#2d2d4a', timeVisible: true },
+    });
+
+    const resp = await fetch('/api/ohlcv/' + currentSymbol + '?period=' + period);
+    const data = await resp.json();
+
+    if (data.status === 'ok' && data.data && data.data.length > 0) {
+      const candleSeries = chart.addCandlestickSeries({
+        upColor: '#00ff88', downColor: '#ff4444',
+        borderUpColor: '#00ff88', borderDownColor: '#ff4444',
+        wickUpColor: '#00ff88', wickDownColor: '#ff4444',
+      });
+      candleSeries.setData(data.data);
+      chart.timeScale().fitContent();
+    } else {
+      el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim)">No price data available</div>';
+    }
+  } catch(e) {
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim)">${e.message}</div>`;
+  }
+}
+
+/* ── Patterns tab ───────────────────────────────────────────── */
+async function loadPatterns(sym) {
+  $('patterns-content').innerHTML = '<span class="loading-text"><span class="spinner"></span>Detecting patterns...</span>';
+  const d = await api('/api/patterns/' + sym);
+  const patterns = d.data || [];
+  if (!patterns.length) {
+    $('patterns-content').innerHTML = '<span class="loading-text">No patterns detected (model may not be loaded)</span>';
+    return;
+  }
+  $('patterns-content').innerHTML = patterns.map(p => `
+    <div class="pattern-card">
+      <div class="pattern-name">${p.pattern.replace(/_/g,' ')}</div>
+      <div class="pattern-conf">Confidence: ${(p.confidence * 100).toFixed(1)}% <span class="badge ${p.direction === 'bullish' ? 'badge-bull' : p.direction === 'bearish' ? 'badge-bear' : 'badge-neutral'}">${p.direction}</span></div>
+      <div class="pattern-impl">${p.implication}</div>
+    </div>
+  `).join('');
+}
+
+/* ── Options tab ────────────────────────────────────────────── */
+async function loadOptions(sym) {
+  $('options-content').innerHTML = '<span class="loading-text"><span class="spinner"></span>Loading options chain...</span>';
+  const d = await api('/api/options/' + sym);
+  if (d.status !== 'ok' || !d.data) { $('options-content').innerHTML = 'Error loading options'; return; }
+  const chain = d.data;
+  const renderLeg = (rows, type) => `
+    <div class="card">
+      <div class="card-title">${type} (${rows.length} strikes)</div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Strike</th><th>Last</th><th>Bid</th><th>Ask</th><th>IV%</th><th>Volume</th><th>OI</th><th>Delta</th><th>Gamma</th></tr></thead>
+          <tbody>${rows.slice(0,20).map(r => `
+            <tr>
+              <td>${fmtNum(r.strike)}</td>
+              <td>${fmtNum(r.last_price)}</td>
+              <td>${fmtNum(r.bid)}</td>
+              <td>${fmtNum(r.ask)}</td>
+              <td>${r.iv != null ? r.iv.toFixed(1) : '–'}</td>
+              <td>${r.volume.toLocaleString()}</td>
+              <td>${(r.open_interest||0).toLocaleString()}</td>
+              <td style="${r.delta > 0 ? 'color:var(--green)' : 'color:var(--red)'}">${r.delta ?? '–'}</td>
+              <td>${r.gamma ?? '–'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  $('options-content').innerHTML = `
+    <p style="color:var(--text-dim);font-size:11px;margin-bottom:12px;">Expiry: ${chain.expiry || 'N/A'} | Spot: $${fmtNum(chain.underlying_price)}</p>
+    <div class="options-grid">
+      ${renderLeg(chain.calls || [], 'Calls')}
+      ${renderLeg(chain.puts || [], 'Puts')}
+    </div>`;
+}
+
+/* ── Fundamentals tab ───────────────────────────────────────── */
+async function loadFundamentals(sym) {
+  $('fundamentals-content').innerHTML = '<span class="loading-text"><span class="spinner"></span>Loading...</span>';
+  const d = await api('/api/stock/' + sym);
+  if (d.status !== 'ok') { $('fundamentals-content').innerHTML = 'Error'; return; }
+  const f = d.data.fundamentals || {};
+  const rows = [
+    ['Revenue (TTM)', fmtLarge(f.revenue_ttm)], ['Free Cash Flow', fmtLarge(f.fcf)],
+    ['P/E Trailing', fmtNum(f.pe_trailing)], ['P/E Forward', fmtNum(f.pe_forward)],
+    ['Price/Book', fmtNum(f.price_to_book)], ['Price/Sales', fmtNum(f.price_to_sales)],
+    ['EV/EBITDA', fmtNum(f.ev_to_ebitda)], ['Debt/Equity', fmtNum(f.debt_to_equity)],
+    ['ROE', f.roe != null ? (f.roe*100).toFixed(1)+'%' : '–'], ['ROA', f.roa != null ? (f.roa*100).toFixed(1)+'%' : '–'],
+    ['Gross Margin', f.gross_margin != null ? (f.gross_margin*100).toFixed(1)+'%' : '–'],
+    ['Operating Margin', f.operating_margin != null ? (f.operating_margin*100).toFixed(1)+'%' : '–'],
+    ['Profit Margin', f.profit_margin != null ? (f.profit_margin*100).toFixed(1)+'%' : '–'],
+    ['Employees', f.employees != null ? f.employees.toLocaleString() : '–'],
+    ['Sector', f.sector || '–'], ['Industry', f.industry || '–'],
+  ];
+  $('fundamentals-content').innerHTML = `
+    <table>
+      <tbody>${rows.map(([k,v]) => `<tr><th style="width:160px">${k}</th><td style="font-family:var(--mono)">${v}</td></tr>`).join('')}</tbody>
+    </table>`;
+}
+
+/* ── Filings tab ────────────────────────────────────────────── */
+async function loadFilings(sym) {
+  $('filings-content').innerHTML = '<span class="loading-text"><span class="spinner"></span>Loading SEC filings...</span>';
+  const d = await api('/api/sec/filings/' + sym);
+  if (d.status !== 'ok') { $('filings-content').innerHTML = 'Error loading filings'; return; }
+  const { filings = [], insider_trades = [] } = d.data || {};
+
+  const filingRows = filings.map(f => `
+    <tr>
+      <td><span class="badge badge-neutral">${f.form}</span></td>
+      <td>${f.date}</td>
+      <td><a href="${f.url}" target="_blank" style="color:var(--accent);text-decoration:none;font-size:11px;">${f.description.slice(0,60)}</a></td>
+    </tr>`).join('');
+
+  const insiderRows = insider_trades.map(t => `
+    <tr>
+      <td>${t.insider_name}</td>
+      <td style="font-size:11px;color:var(--text-dim)">${t.role}</td>
+      <td>${t.transaction_date}</td>
+      <td><span class="badge ${t.transaction_type === 'buy' ? 'badge-bull' : 'badge-bear'}">${t.transaction_type}</span></td>
+      <td style="font-family:var(--mono)">${t.shares != null ? t.shares.toLocaleString() : '–'}</td>
+      <td style="font-family:var(--mono)">$${t.price != null ? fmtNum(t.price) : '–'}</td>
+      <td style="font-family:var(--mono)">${t.value_usd != null ? fmtLarge(t.value_usd) : '–'}</td>
+    </tr>`).join('');
+
+  $('filings-content').innerHTML = `
+    <div class="card"><div class="card-title">Recent Filings</div>
+      <table><thead><tr><th>Form</th><th>Date</th><th>Document</th></tr></thead>
+      <tbody>${filingRows || '<tr><td colspan="3" style="color:var(--text-dim)">No filings found</td></tr>'}</tbody></table>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="card-title">Insider Form 4 (last 90 days)</div>
+      <table><thead><tr><th>Insider</th><th>Role</th><th>Date</th><th>Type</th><th>Shares</th><th>Price</th><th>Value</th></tr></thead>
+      <tbody>${insiderRows || '<tr><td colspan="7" style="color:var(--text-dim)">No insider trades found</td></tr>'}</tbody></table>
+    </div>`;
+}
+
+/* ── News tab ───────────────────────────────────────────────── */
+async function loadSymbolNews(sym) {
+  $('news-articles').innerHTML = '<span class="loading-text"><span class="spinner"></span>Loading news...</span>';
+  $('groq-news-content').innerHTML = '<span class="loading-text">Waiting for articles...</span>';
+
+  const d = await api('/api/news?ticker=' + sym + '&limit=10');
+  const articles = d.data || [];
+  $('news-articles').innerHTML = articles.map(a => `
+    <div class="card" style="display:flex;gap:12px;align-items:flex-start;padding:10px 14px">
+      <div style="flex:1">
+        <a href="${a.url}" target="_blank" style="color:var(--text-primary);text-decoration:none;font-weight:600;font-size:12px">${a.title}</a>
+        <div style="margin-top:4px;font-size:10px;color:var(--text-dim)">${a.source} · ${a.age_label}</div>
+      </div>
+      <span class="badge ${a.sentiment > 0.1 ? 'badge-bull' : a.sentiment < -0.1 ? 'badge-bear' : 'badge-neutral'}">${a.sentiment > 0.1 ? '+ bullish' : a.sentiment < -0.1 ? '- bearish' : 'neutral'}</span>
+    </div>`).join('') || '<span class="loading-text">No recent news found</span>';
+
+  // Load Groq analysis asynchronously
+  const ga = await api('/api/news/analysis?tickers=' + sym);
+  const gd = ga.data || {};
+  const summary = gd.summary || '';
+  const impact = gd.impact || [];
+  $('groq-news-content').innerHTML = summary
+    ? `<div style="white-space:pre-line;font-size:12px;margin-bottom:12px">${summary}</div>
+       ${impact.map(i => `<div class="card" style="margin-bottom:8px;padding:8px 12px;display:flex;gap:10px;align-items:center">
+         <strong style="font-family:var(--mono)">${i.ticker}</strong>
+         <span class="badge ${i.sentiment === 'bullish' ? 'badge-bull' : i.sentiment === 'bearish' ? 'badge-bear' : 'badge-neutral'}">${i.sentiment}</span>
+         <span style="font-size:11px;color:var(--text-dim);flex:1">${i.reason}</span>
+         <span class="badge badge-neutral">${i.action_hint}</span>
+       </div>`).join('')}`
+    : '<span class="loading-text">Groq analysis unavailable (no API key or no articles)</span>';
+}
+
+/* ── Knowledge Graph ────────────────────────────────────────── */
+async function loadGraph(hops) {
+  if (!currentSymbol) return;
+  const el = $('cy-container');
+  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim)"><span class="spinner"></span> Loading graph...</div>';
+  const d = await api('/api/graph/' + currentSymbol + '?hops=' + hops);
+  if (d.status !== 'ok' || !d.data) { el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim)">No graph data available</div>'; return; }
+  el.innerHTML = '';
+  const graphData = d.data;
+  const relColors = {supplier:'#6366f1', customer:'#00ff88', ecosystem:'#fbbf24', competitor:'#ff4444', jv_partner:'#38bdf8'};
+
+  cy = cytoscape({
+    container: el,
+    elements: [
+      ...graphData.nodes.map(n => ({ data: n.data })),
+      ...graphData.edges.map(e => ({ data: e.data })),
+    ],
+    style: [
+      { selector: 'node', style: {
+        'background-color': '#6366f1', 'label': 'data(label)',
+        'color': '#e2e8f0', 'font-size': '10px', 'text-valign': 'bottom',
+        'text-margin-y': 4, 'width': 36, 'height': 36,
+      }},
+      { selector: `node[id = "${currentSymbol}"]`, style: {
+        'background-color': '#00ff88', 'width': 48, 'height': 48,
+        'font-weight': '700', 'font-size': '12px',
+      }},
+      { selector: 'edge', style: {
+        'width': 1.5, 'line-color': '#2d2d4a', 'target-arrow-shape': 'triangle',
+        'target-arrow-color': '#2d2d4a', 'curve-style': 'bezier',
+        'label': 'data(rel_type)', 'font-size': '8px', 'color': '#64748b',
+        'text-rotation': 'autorotate',
+      }},
+      ...Object.entries(relColors).map(([rel, color]) => ({
+        selector: `edge[rel_type = "${rel}"]`,
+        style: { 'line-color': color, 'target-arrow-color': color },
+      })),
+    ],
+    layout: { name: 'cose', animate: false, randomize: false },
+  });
+
+  cy.on('tap', 'node', evt => {
+    const node = evt.target;
+    if (node.id() !== currentSymbol) {
+      $('symbol-input').value = node.id();
+      analyseSymbol();
+    }
+  });
+}
+
+/* ── COT tab ─────────────────────────────────────────────────── */
+async function loadCOT() {
+  $('cot-content').innerHTML = '<span class="loading-text"><span class="spinner"></span>Loading COT data...</span>';
+  const d = await api('/api/cot');
+  if (d.status !== 'ok') { $('cot-content').innerHTML = 'COT data unavailable'; return; }
+  const rows = d.data || [];
+  $('cot-content').innerHTML = `
+    <table>
+      <thead><tr><th>Contract</th><th>NC Net</th><th>Comm Net</th><th>Sentiment%</th><th>View</th></tr></thead>
+      <tbody>${rows.map(r => `
+        <tr>
+          <td>${r.contract}</td>
+          <td style="font-family:var(--mono)">${(r.non_commercial_net||0).toLocaleString()}</td>
+          <td style="font-family:var(--mono)">${(r.commercial_net||0).toLocaleString()}</td>
+          <td style="font-family:var(--mono)">${r.sentiment_pct}%</td>
+          <td><span class="badge ${r.sentiment==='bullish'?'badge-bull':r.sentiment==='bearish'?'badge-bear':'badge-neutral'}">${r.sentiment}</span></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+/* ── Risk metrics ────────────────────────────────────────────── */
+async function loadRiskMetrics() {
+  const d = await api('/api/performance');
+  const p = d.data || {};
+  $('risk-metrics-content').innerHTML = `
+    <table>
+      <tbody>
+        <tr><th>Win Rate</th><td style="font-family:var(--mono)">${p.win_rate != null ? (p.win_rate*100).toFixed(1)+'%' : '–'}</td></tr>
+        <tr><th>Profit Factor</th><td style="font-family:var(--mono)">${p.profit_factor != null ? fmtNum(p.profit_factor) : '–'}</td></tr>
+        <tr><th>Avg Win</th><td style="font-family:var(--mono);color:var(--green)">${p.avg_win_pct != null ? '+'+p.avg_win_pct.toFixed(1)+'%' : '–'}</td></tr>
+        <tr><th>Avg Loss</th><td style="font-family:var(--mono);color:var(--red)">${p.avg_loss_pct != null ? p.avg_loss_pct.toFixed(1)+'%' : '–'}</td></tr>
+        <tr><th>Total Trades</th><td style="font-family:var(--mono)">${p.total_trades ?? '–'}</td></tr>
+      </tbody>
+    </table>`;
+}
+
+/* ── FRED sparklines ─────────────────────────────────────────── */
+async function loadFredSparklines() {
+  const series = ['GDP', 'CPIAUCSL', 'UNRATE', 'DFF'];
+  for (const s of series) {
+    const d = await api('/api/macro/fred/' + s + '?limit=20');
+    if (d.status !== 'ok' || !d.data.length) continue;
+    const obs = d.data;
+    const last = obs[obs.length - 1];
+    $('fred-' + s + '-val').textContent = fmtNum(last.value) + '%';
+    drawSparkline('fred-' + s + '-chart', obs.map(o => o.value));
+  }
+}
+
+function drawSparkline(canvasId, values) {
+  const canvas = $(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.offsetWidth || 200, h = canvas.offsetHeight || 60;
+  canvas.width = w; canvas.height = h;
+  const min = Math.min(...values), max = Math.max(...values);
+  const range = max - min || 1;
+  const pts = values.map((v, i) => [i / (values.length - 1) * w, h - ((v - min) / range) * h * 0.85 - 5]);
+  ctx.beginPath();
+  ctx.strokeStyle = '#6366f1';
+  ctx.lineWidth = 1.5;
+  pts.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+  ctx.stroke();
+}
+
+/* ── Economic calendar ───────────────────────────────────────── */
+async function loadCalendar() {
+  const d = await api('/api/economic-calendar');
+  const events = d.data || [];
+  if (!events.length) { $('cal-content').innerHTML = '<span class="loading-text">No upcoming events</span>'; return; }
+  $('cal-content').innerHTML = events.slice(0, 20).map(e => `
+    <div class="cal-event">
+      <span class="cal-time">${e.datetime || e.date || ''}</span>
+      <span class="cal-impact impact-${(e.impact || 'low').toLowerCase()}">${e.impact || 'LOW'}</span>
+      <span class="cal-title">${e.event || e.name || ''}</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">${e.forecast != null ? 'F: '+e.forecast : ''}</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">${e.previous != null ? 'P: '+e.previous : ''}</span>
+    </div>`).join('');
+}
+
+/* ── AI Agents ───────────────────────────────────────────────── */
+async function runAgent(name) {
+  $('agent-report').textContent = 'Generating report...';
+  $('agent-timestamp').textContent = '';
+  const d = await api('/api/ai/agent/' + name);
+  $('agent-report').textContent = d.report || (d.message || 'Error generating report');
+  $('agent-timestamp').textContent = 'Generated at ' + new Date().toLocaleTimeString() + ' · ' + name;
+}
+</script>
+</body>
+</html>
