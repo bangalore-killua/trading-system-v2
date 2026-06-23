@@ -106,3 +106,18 @@ ultralytics @ git+https://github.com/bangalore-killua/trading-system-v2-ultralyt
 mplfinance @ git+https://github.com/bangalore-killua/trading-system-v2-mplfinance.git@v0.12.10b0
 
 Pillow==11.0.0                     # python-pillow org — stable, won't disappear
+
+# ── Phase 2: Universe Screener + Knowledge Graph ──────────────────────────────
+networkx>=3.3                      # Graph library for financial knowledge graph
+finvizfinance>=0.14                # ETF holdings + sector fundamentals (MIT)
+
+# ── Phase 3: News Intelligence ────────────────────────────────────────────────
+sentence-transformers>=2.7.0       # Cross-article correlation (CPU-fast, 80MB model)
+# spaCy already listed above (transformers section) — en_core_web_sm model required:
+# python -m spacy download en_core_web_sm
+
+# ── Phase 4–5: LLM + Feedback Loop ───────────────────────────────────────────
+groq>=0.4.0                        # Groq API client (Llama 3.3 70B, free tier)
+agno>=1.0.0                        # Fincept agent framework (agno.models.groq)
+chromadb>=0.5.0                    # Vector store for RAG feedback memory
+optuna>=3.6                        # Hyperparameter tuning for LightGBM retraining
