@@ -53,13 +53,27 @@ class HotUniverse:
     via `on_symbol_added()` to be notified immediately on new entries.
     """
 
-    # TTL per trigger source (hours) — overridden by config.json at runtime
+    # TTL per trigger source (hours) — overridden by config.json at runtime.
+    # News-driven entries use catalyst-based durations (weeks) so that discovered
+    # stocks stay in scope long enough for the weekly scoring cycle to act on them.
+    # TV_SCREENER / VOLUME_SPIKE use short TTLs (intraday breakout signals only).
     DEFAULT_TTL_HOURS: Dict[str, float] = {
-        TriggerSource.NEWS_EVENT: 4.0,
-        TriggerSource.VOLUME_SPIKE: 2.0,
-        TriggerSource.EDGAR_8K: 6.0,
-        TriggerSource.EDGAR_FORM4: 6.0,
-        TriggerSource.TV_SCREENER: 2.0,
+        TriggerSource.NEWS_EVENT: 336.0,   # 2 weeks  (earnings / FDA catalyst default)
+        TriggerSource.VOLUME_SPIKE: 2.0,   # 2 hours  (intraday only)
+        TriggerSource.EDGAR_8K: 1008.0,    # 6 weeks  (material agreements / partnerships)
+        TriggerSource.EDGAR_FORM4: 336.0,  # 2 weeks  (insider buy signal)
+        TriggerSource.TV_SCREENER: 2.0,    # 2 hours  (momentum breakout, intraday)
+    }
+
+    # Groq-assigned catalyst durations override the defaults above when provided.
+    # Keys map catalyst_type strings returned by Groq to TTL in hours.
+    CATALYST_TTL_HOURS: Dict[str, float] = {
+        "earnings": 336.0,       # 2 weeks
+        "fda": 336.0,            # 2 weeks
+        "partnership": 1008.0,   # 6 weeks
+        "merger": 2160.0,        # 3 months
+        "acquisition": 2160.0,   # 3 months
+        "default": 672.0,        # 4 weeks
     }
 
     def __init__(self, ttl_config: Optional[Dict[str, float]] = None):
@@ -80,9 +94,18 @@ class HotUniverse:
         headline: Optional[str] = None,
         sentiment_score: Optional[float] = None,
         metadata: Optional[Dict] = None,
+        catalyst_type: Optional[str] = None,
     ) -> bool:
-        """Add or refresh a symbol. Returns True if this is a brand-new entry."""
-        ttl_h = self.ttl_hours.get(source, 2.0)
+        """Add or refresh a symbol. Returns True if this is a brand-new entry.
+
+        catalyst_type overrides the source-based TTL when provided. Use the
+        CATALYST_TTL_HOURS mapping (earnings, fda, partnership, merger, etc.)
+        for Groq-assigned durations.
+        """
+        if catalyst_type and catalyst_type in self.CATALYST_TTL_HOURS:
+            ttl_h = self.CATALYST_TTL_HOURS[catalyst_type]
+        else:
+            ttl_h = self.ttl_hours.get(source, 2.0)
         now = datetime.utcnow()
         expires_at = now + timedelta(hours=ttl_h)
 

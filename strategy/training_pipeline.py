@@ -209,14 +209,19 @@ class TrainingPipeline:
 
         # Final model trained on all data
         stats = model.train(X, y, class_weights=class_weights)
-        model.save()
+        wf_avg = _mean_or_none(
+            [f["high_conf_accuracy"] for f in fold_results if f["high_conf_accuracy"] is not None]
+        )
+        # Pass symbols list and walk-forward accuracy for versioned save + rollback guard
+        train_symbols = list(dict.fromkeys(
+            df["symbol"].tolist() if "symbol" in df.columns else []
+        ))
+        model.save(symbols=train_symbols, wf_avg_accuracy=wf_avg)
 
         summary = {
             **stats,
             "walk_forward_folds": fold_results,
-            "avg_high_conf_accuracy": _mean_or_none(
-                [f["high_conf_accuracy"] for f in fold_results if f["high_conf_accuracy"] is not None]
-            ),
+            "avg_high_conf_accuracy": wf_avg,
         }
 
         logger.info("Training complete: %s", summary)
