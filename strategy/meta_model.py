@@ -1,5 +1,5 @@
 """
-meta_model.py — LightGBM Meta-Model Wrapper (Phase 3+)
+meta_model.py — LightGBM Scorecard Wrapper (v2)
 
 Wraps the LightGBM multi-class classifier (labels: -1, 0, +1) trained on
 triple-barrier labeled OHLCV + feature vectors.
@@ -10,20 +10,18 @@ Prediction contract:
     0.52–0.65 → half size (multiplier 0.5)
     < 0.52  → skip trade (multiplier 0.0)
 
-The Scorer class in scorer.py holds a MetaModel instance and calls it only
-when meta_model_enabled=true in config.json. In Phase 1/2 it never executes.
-
-Training flow (see training_pipeline.py):
-  1. Retroactively label 5yr OHLCV via TripleBarrierLabeler
-  2. Compute feature vectors for each labeled bar
-  3. Walk-forward split (TimeSeriesSplit, n_splits=5)
-  4. Train LightGBM on each fold
-  5. Serialize final model to models/meta_model_lgbm.pkl
+Scorecard versioning:
+  Models are saved as scorecard_v{N}.pkl and tracked in scorecard_meta.json.
+  Pass model_path="models/scorecard_meta.json" to load the active version.
+  On save(): writes scorecard_v{N+1}.pkl and updates scorecard_meta.json.
+  Auto-rollback: if new WF accuracy < previous version, keeps the old version.
+  Retains last 3 versions; older files are deleted automatically.
 """
 
 import json
 import logging
 import pickle
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -38,16 +36,52 @@ LABEL_TO_CLASS = {-1: 0, 0: 1, 1: 2}
 CLASS_TO_LABEL = {0: -1, 1: 0, 2: 1}
 WIN_CLASS_IDX = 2  # class index for label +1 (profit hit)
 
+SCORECARD_META_FILENAME = "scorecard_meta.json"
+KEEP_LAST_N_VERSIONS = 3
+
+
+def _load_scorecard_meta(meta_path: Path) -> dict:
+    """Read scorecard_meta.json; return empty skeleton if file doesn't exist."""
+    if meta_path.exists():
+        with open(meta_path) as f:
+            return json.load(f)
+    return {
+        "active_version": 0,
+        "versions": {},
+        "rollback_available": False,
+        "keep_last_n_versions": KEEP_LAST_N_VERSIONS,
+    }
+
+
+def _save_scorecard_meta(meta_path: Path, meta: dict) -> None:
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2, default=str)
+
+
+def _resolve_active_pkl(meta_path: Path) -> Optional[Path]:
+    """Given scorecard_meta.json path, return the active .pkl Path or None."""
+    meta = _load_scorecard_meta(meta_path)
+    active_v = meta.get("active_version", 0)
+    if active_v == 0:
+        return None
+    vkey = f"v{active_v}"
+    file_name = meta.get("versions", {}).get(vkey, {}).get("file")
+    if not file_name:
+        return None
+    return meta_path.parent / file_name
+
 
 class MetaModel:
-    """LightGBM multi-class wrapper for the meta-labeling P(win) prediction.
+    """LightGBM multi-class wrapper for the scorecard P(win) prediction.
 
     Parameters
     ----------
     model_path : str or Path
-        Where to save / load the serialized model artifact.
+        Either a direct .pkl path (legacy) or a scorecard_meta.json path (versioned).
+        When given scorecard_meta.json the active version's .pkl is resolved at load time.
     config : dict
-        model section from config.json.
+        Full config.json dict (model section is read internally).
     """
 
     DEFAULT_PARAMS = {
@@ -57,7 +91,7 @@ class MetaModel:
         "learning_rate": 0.05,
         "max_depth": 6,
         "num_leaves": 31,
-        "min_child_samples": 20,
+        "min_child_samples": 50,  # was 20; increased to reduce overfitting
         "subsample": 0.8,
         "subsample_freq": 1,
         "colsample_bytree": 0.8,
@@ -70,17 +104,31 @@ class MetaModel:
 
     def __init__(
         self,
-        model_path: str = "models/meta_model_lgbm.pkl",
+        model_path: str = "models/scorecard_meta.json",
         config: Optional[Dict] = None,
     ):
-        self._path = Path(model_path)
+        given = Path(model_path)
         self._cfg = (config or {}).get("model", config or {})
         self._model = None
         self._feature_names: List[str] = []
         self._trained_at: Optional[str] = None
+
+        # Versioned mode: path points to scorecard_meta.json
+        if given.suffix == ".json" and given.name == SCORECARD_META_FILENAME:
+            self._meta_path: Optional[Path] = given
+            pkl = _resolve_active_pkl(given)
+            self._path = pkl if pkl else given.parent / "scorecard_v1.pkl"
+        else:
+            # Legacy mode: direct .pkl path
+            self._meta_path = given.parent / SCORECARD_META_FILENAME
+            self._path = given
         self._train_stats: Dict = {}
 
-        if self._path.exists():
+        # Auto-load: trigger when the pkl exists OR when a meta registry exists
+        should_load = self._path.exists() or (
+            self._meta_path is not None and self._meta_path.exists()
+        )
+        if should_load:
             self.load()
 
     @property
@@ -254,34 +302,106 @@ class MetaModel:
 
         return fold_results
 
-    def save(self) -> None:
-        """Serialize model + metadata to disk."""
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+    def save(self, symbols: Optional[List[str]] = None, wf_avg_accuracy: Optional[float] = None) -> None:
+        """Serialize model + metadata to disk with scorecard versioning.
+
+        Determines the next version number from scorecard_meta.json, writes
+        scorecard_v{N}.pkl, then updates the registry. Keeps only the last
+        KEEP_LAST_N_VERSIONS versions and deletes older .pkl files.
+
+        Auto-rollback: if wf_avg_accuracy is provided and lower than the previous
+        version's accuracy, the new version is NOT activated (rollback logged).
+        """
+        models_dir = self._path.parent
+        models_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load or initialise the registry
+        meta_path = self._meta_path or (models_dir / SCORECARD_META_FILENAME)
+        meta = _load_scorecard_meta(meta_path)
+
+        prev_version = meta.get("active_version", 0)
+        new_version = prev_version + 1
+        new_file = f"scorecard_v{new_version}.pkl"
+        new_pkl_path = models_dir / new_file
+
+        # Rollback guard: skip activation if walk-forward accuracy regressed
+        if wf_avg_accuracy is not None and prev_version > 0:
+            prev_key = f"v{prev_version}"
+            prev_wf = meta["versions"].get(prev_key, {}).get("wf_avg_accuracy")
+            if prev_wf is not None and wf_avg_accuracy < prev_wf:
+                logger.warning(
+                    "ROLLBACK: new WF accuracy %.4f < previous %.4f — keeping v%d active",
+                    wf_avg_accuracy, prev_wf, prev_version,
+                )
+                return
+
+        # Write .pkl artifact
         artifact = {
             "model": self._model,
             "feature_names": self._feature_names,
             "trained_at": self._trained_at,
             "train_stats": self._train_stats,
         }
-        with open(self._path, "wb") as f:
+        with open(new_pkl_path, "wb") as f:
             pickle.dump(artifact, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-        # Write a companion JSON for quick inspection without loading pickle
-        meta_path = self._path.with_suffix(".json")
-        with open(meta_path, "w") as f:
-            json.dump(
-                {
-                    "trained_at": self._trained_at,
-                    "n_features": len(self._feature_names),
-                    "feature_names": self._feature_names,
-                    **self._train_stats,
-                },
-                f, indent=2, default=str,
-            )
-        logger.info("MetaModel saved → %s", self._path)
+        # Mark previous version as retired
+        if prev_version > 0:
+            prev_key = f"v{prev_version}"
+            if prev_key in meta["versions"]:
+                meta["versions"][prev_key]["retired_at"] = datetime.utcnow().date().isoformat()
+
+        # Register the new version
+        meta["versions"][f"v{new_version}"] = {
+            "file": new_file,
+            "trained_at": self._trained_at,
+            "n_samples": self._train_stats.get("n_samples", 0),
+            "n_features": len(self._feature_names),
+            "symbols": symbols or [],
+            "train_accuracy": self._train_stats.get("train_accuracy"),
+            "wf_avg_accuracy": wf_avg_accuracy,
+            "retired_at": None,
+        }
+        meta["active_version"] = new_version
+        meta["rollback_available"] = prev_version > 0
+        meta["keep_last_n_versions"] = KEEP_LAST_N_VERSIONS
+
+        # Prune old versions beyond the keep-limit
+        all_versions = sorted(
+            (int(k[1:]) for k in meta["versions"]),
+            reverse=True,
+        )
+        for old_v in all_versions[KEEP_LAST_N_VERSIONS:]:
+            old_key = f"v{old_v}"
+            old_file = meta["versions"].get(old_key, {}).get("file")
+            if old_file:
+                old_path = models_dir / old_file
+                if old_path.exists():
+                    old_path.unlink()
+                    logger.info("Deleted old scorecard version: %s", old_file)
+            meta["versions"].pop(old_key, None)
+
+        _save_scorecard_meta(meta_path, meta)
+        self._path = new_pkl_path
+        logger.info("Scorecard saved → %s (active v%d)", new_pkl_path, new_version)
 
     def load(self) -> None:
-        """Load model artifact from disk."""
+        """Load model artifact from disk.
+
+        If self._meta_path points to scorecard_meta.json, resolve the active
+        version's .pkl first before loading. Falls back gracefully if not found.
+        """
+        # Re-resolve active pkl in case scorecard_meta.json changed since __init__
+        if self._meta_path and self._meta_path.exists():
+            resolved = _resolve_active_pkl(self._meta_path)
+            if resolved:
+                self._path = resolved
+
+        if not self._path.exists():
+            logger.warning("Scorecard not found at %s — model not loaded", self._path)
+            self._model = None
+            return
+
         try:
             with open(self._path, "rb") as f:
                 artifact = pickle.load(f)
@@ -290,12 +410,22 @@ class MetaModel:
             self._trained_at = artifact.get("trained_at")
             self._train_stats = artifact.get("train_stats", {})
             logger.info(
-                "MetaModel loaded from %s — %d features, trained %s",
+                "Scorecard loaded from %s — %d features, trained %s",
                 self._path, len(self._feature_names), self._trained_at,
             )
         except Exception:
-            logger.exception("Failed to load MetaModel from %s", self._path)
+            logger.exception("Failed to load scorecard from %s", self._path)
             self._model = None
+
+    def get_active_version_info(self) -> dict:
+        """Return the active version's metadata from scorecard_meta.json."""
+        if not self._meta_path:
+            return {}
+        meta = _load_scorecard_meta(self._meta_path)
+        active_v = meta.get("active_version", 0)
+        if active_v == 0:
+            return {}
+        return meta["versions"].get(f"v{active_v}", {})
 
     def feature_importance(self, top_n: int = 30) -> pd.DataFrame:
         """Return top-N most important features (gain-based)."""
