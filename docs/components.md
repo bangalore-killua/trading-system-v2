@@ -1,90 +1,152 @@
-# Component Reference
+# Component Reference (v13)
 
-## Open Source Libraries Used
+## ML / Modeling
 
-### ML / Modeling
+| Library | Role | Why |
+|---------|------|-----|
+| AutoGluon | Entry, dip, tranche, meta-stacking models | Tries 22+ models, ensembles winners, ONNX export |
+| LightGBM | Fallback / primary entry model | Fast gradient boosting, handles class imbalance |
+| PyTorch | Exit LSTM binary classifier | Sequence model for P(peak in next 5 days) |
+| mlfinlab | Purged cross-validation (CPCV) | Prevents financial data leakage; honest IC ~54% |
+| sentence-transformers | Cross-article news clustering | all-MiniLM-L6-v2: 80MB, CPU-fast |
+| transformers (FinBERT) | News sentiment | yiyanghkust/finbert-tone, financial domain |
+| chromadb | Vector store for feedback RAG | Embedded, no external service |
+| onnxruntime | Model inference | 3–5× faster than PyTorch/LGBM native |
 
-| Library | Version | Role | Why |
-|---|---|---|---|
-| LightGBM | latest | Core trading signal model | Fast gradient boosting, handles class imbalance, interpretable feature importance |
-| sentence-transformers | >=2.7.0 | Cross-article news clustering | all-MiniLM-L6-v2: 80MB, CPU-fast, excellent semantic similarity |
-| transformers (FinBERT) | latest | News sentiment scoring | Pre-trained financial domain BERT, most accurate for financial text |
-| ultralytics (YOLOv8) | fork v8.3.40 | Chart pattern detection | 16 patterns, custom trained, real-time inference |
-| optuna | >=3.6 | LightGBM hyperparameter tuning | Efficient Bayesian optimization with pruning |
-| chromadb | >=0.5.0 | Vector store for feedback RAG | Embedded DB, no external service needed |
-
-### Data
-
-| Library | Version | Role |
-|---|---|---|
-| yfinance | latest | Stock quotes, OHLCV, fundamentals, options, news |
-| finvizfinance | >=0.14 | ETF holdings for theme basket expansion |
-| networkx | >=3.3 | Knowledge graph (supply-chain DiGraph) |
-| pandas-datareader | - | FRED macro data fallback (no API key needed) |
-| fredapi | - | FRED macro data (requires free API key) |
-| requests | latest | SEC EDGAR JSON API, CFTC CSV download |
-| tradingview-screener | - | Momentum expansion + daily mover fetch |
-| spacy | >=3.7.0 | NER for company name → ticker extraction |
-
-### LLM
-
-| Library | Version | Role |
-|---|---|---|
-| groq | >=0.4.0 | Llama 3.3 70B client (free tier: 14,400 req/day) |
-| agno | >=1.0.0 | Agent framework for portfolio/risk/signal agents |
-
-### Backend
+## Data Sources
 
 | Library | Role |
-|---|---|
-| fastapi | REST API server |
+|---------|------|
+| tvdatafeed | OHLCV all TFs native (1m→1M); replaces yfinance for price data |
+| yfinance | Fundamentals, earnings, holders, financials (quote data deferred to tvdatafeed) |
+| alpaca-py | Real-time bars + news WebSocket + order execution |
+| fredapi | FRED macro data: yield curve, credit spread, VIX term structure |
+| feedparser | RSS parsing for PRNewswire, BusinessWire, Google News |
+| playwright | Browser automation for Unusual Whales, Earnings Whispers, Seeking Alpha |
+| requests | SEC EDGAR JSON API, CapitolTrades, Senate EFTS |
+| pytrends | Google Trends (retail attention signal) |
+| tradingview-screener | Momentum expansion, daily mover fetch (all US stocks, free) |
+| networkx | Knowledge graph (supply-chain DiGraph from SEC 10-K) |
+| finvizfinance | ETF holdings for theme basket expansion |
+| spacy | NER for company name → ticker extraction |
+| pandas-ta | 130+ technical indicators + 60 CDL candlestick patterns |
+| vectorbt | Vectorized backtester (intelligent_backtest.py) |
+| scipy | Spearman correlation for IC tracking |
+
+## LLM / AI
+
+| Library | Model | Role | Cost |
+|---------|-------|------|------|
+| groq | llama-3.3-70b-versatile | Routine verdicts, tranche consensus | Free (14,400 req/day) |
+| anthropic | claude-haiku-4-5-20251001 | Research, exit/dip verdicts, scenarios | ~$0.72/mo |
+| anthropic | claude-sonnet-4-6 | Final synthesis, anomaly detection | ~$2/mo |
+
+## Backend
+
+| Library | Role |
+|---------|------|
+| fastapi | REST API server (40+ endpoints) |
 | uvicorn | ASGI server |
 | sqlalchemy | ORM for PostgreSQL |
 | alembic | Database migrations |
-| alpaca-py | Broker API (paper + live) |
+| apscheduler | Job orchestrator (PostgreSQL job store) |
+| websockets | Alpaca WebSocket streams |
 
-### Frontend
+## Frontend (Terminal)
 
-| Library | CDN | Role |
-|---|---|---|
-| Lightweight Charts v5 | unpkg | Candlestick/sparkline charts |
-| Cytoscape.js 3.30 | unpkg | Knowledge graph spider-web visualization |
+| Asset | CDN | Role |
+|-------|-----|------|
+| TradingView Widget | s3.tradingview.com/tv.js | Main chart (free embed) — all TFs, dark theme, volume, MA, RSI |
+| Canvas API | Native browser | Tranche overlay on top of TradingView iframe |
+| Cytoscape.js | CDN | Knowledge graph visualisation |
 
-## Model Files (gitignored)
+**v13 note:** TradingView widget replaced the custom Lightweight Charts implementation.
+9 timeframe buttons (1m/5m/15m/30m/1H/4H/1D/1W/1M) each update `TradingView.widget({ interval })`.
 
+## Algebraic Pattern Detector (replaces YOLOv8)
+
+`data/sources/pattern_detector.py` — 12 patterns, all algebraic, no model file required.
+
+| Pattern | Method |
+|---------|--------|
+| Cup and handle | Peak1 / trough / Peak2 geometry + depth 15–35% + recovery > 85% |
+| Head and shoulders | 3-peak structure with shoulders below head |
+| Bull flag | Tight consolidation after strong move |
+| Double bottom | Two troughs at similar price level |
+| Breakout | Price exceeds N-period high on volume confirmation |
+| VWAP reclaim | Price re-crosses VWAP after pullback |
+| RSI divergence | Price lower low but RSI higher low |
+| Support bounce | Touch of defined support level |
+| Momentum thrust | ADX > 25 + directional movement confirmation |
+| Volume surge | Volume > 2× 20-day average |
+| Moving average crossover | EMA50 crosses EMA200 |
+| Bollinger squeeze | BB width < 20th percentile → expansion signal |
+
+Advantages over YOLOv8:
+- Deterministic — same input always gives same output
+- No training data, no GPU, no image pipeline
+- Microseconds vs milliseconds
+- Transparent — you can read exactly why it fired
+- Not sensitive to chart rendering style
+
+## SourceWithFallback Base Class
+
+All Playwright scrapers inherit from `data/sources/base_source.py`:
+
+```python
+class SourceWithFallback:
+    name: str
+    fallbacks: list  # ordered, tried in sequence
+
+    def get(self, symbol: str):
+        # 1. Try primary (Playwright)
+        # 2. Try each fallback in order
+        # 3. Telegram alert on degradation (1h cooldown)
+        # 4. Return None if all fail → caller uses 0.5 neutral default
 ```
-models/
-  scorecard_meta.json     ← tracked in git (version manifest only)
-  scorecard_v1.pkl        ← gitignored
-  scorecard_v2.pkl        ← gitignored
-  chart_patterns_yolov8n.pt  ← gitignored
-  knowledge_graph.json    ← gitignored
-```
 
-## API Endpoints Summary
+Fallback hierarchy:
 
-### Trading & Signals
-- `GET /api/signals` — current watchlist signals with P(win)
-- `GET /api/positions` — current open positions
-- `GET /api/performance` — win rate, profit factor, drawdown
+| Source | Primary | Fallback 1 | Fallback 2 | If all down |
+|--------|---------|-----------|-----------|-------------|
+| unusual_whales | unusualwhales.com | Barchart options | yfinance chain | score = 0.5 |
+| earnings_whispers | earningswhispers.com | EW RSS | yfinance estimate | use official |
+| seeking_alpha | seekingalpha.com | Google News RSS | skip | skip |
+| research_agent | Playwright browse | memory-only + Haiku | skip | use cached |
 
-### Market Data (via Fincept modules)
-- `GET /api/macro/snapshot` — FRED 5-indicator macro snapshot
-- `GET /api/macro/fred/{series_id}` — arbitrary FRED series
-- `GET /api/global/indices` — SPY/QQQ/GLD/VIX/futures quotes
-- `GET /api/ohlcv/{symbol}` — OHLCV in Lightweight Charts format
-- `GET /api/stock/{symbol}` — quote + fundamentals + news
-- `GET /api/options/{symbol}` — options chain with BS Greeks
-- `GET /api/cot` — COT positioning for 10 futures contracts
-- `GET /api/sec/filings/{symbol}` — SEC filings + Form 4 insider trades
+PRNewswire, BusinessWire, and StockTwits are RSS/API — no Playwright, no fallback needed.
 
-### Intelligence
-- `GET /api/news` — recent articles with FinBERT sentiment
-- `GET /api/news/analysis` — sentence-transformers + Groq portfolio analysis
-- `GET /api/graph/{symbol}` — Cytoscape.js knowledge graph
-- `GET /api/patterns/{symbol}` — YOLOv8 chart pattern detections
-- `GET /api/ai/agent/{agent_name}` — Groq AI agent report
+## Terminal — 11 Tabs
 
-### UI
-- `GET /dashboard` — main trading dashboard
-- `GET /terminal` — Bloomberg-style research terminal
+| Tab | Data source | API endpoint |
+|-----|------------|--------------|
+| Overview | yfinance.info (24 fields) | inline in analyseSymbol() |
+| Chart | TradingView widget + canvas tranche overlay | /api/ohlcv/{sym} for tranche positions |
+| Analysis | yfinance recommendations + Claude Haiku scenarios | /api/analysis/{sym} |
+| Earnings | yfinance earnings_history + quarterly_financials | /api/earnings/{sym} |
+| Financials | yfinance quarterly/annual statements | /api/financials/{sym}?period=q|a |
+| Holdings | yfinance institutional/mutual/insider + congressional | /api/holdings/{sym} |
+| Options | Unusual Whales + yfinance chain | /api/options/{sym} |
+| Filings | SEC EDGAR sec_data.py | /api/sec/filings/{sym} |
+| News | PRNewswire + BusinessWire + Google News merged | /api/news?ticker={sym} |
+| Relations | Cytoscape knowledge graph | /api/graph/{sym} |
+| COT | CFTC COT data | /api/cot |
+
+## Data Sources — All Free
+
+| Source | API key? | TTL / frequency |
+|--------|----------|----------------|
+| tvdatafeed | None | On demand |
+| Alpaca bars + news | Free account | Real-time WebSocket |
+| PRNewswire RSS | None | Every 5 min |
+| BusinessWire RSS | None | Every 5 min |
+| SEC EDGAR JSON | None | Every 60s (8-K/Form 4) |
+| FRED API | Free registration | Hourly |
+| Unusual Whales | None (Playwright) | Per request |
+| Capitol Trades | None | 6h cache |
+| Senate EFTS | None | 6h cache |
+| Google News RSS | None | Per request |
+| StockTwits | None (public API) | Per request |
+| TradingView Screener | None | Every 5 min |
+| yfinance | None | Per request |
+| Google Trends (pytrends) | None | Per request |
