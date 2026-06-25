@@ -1,30 +1,30 @@
 """
-feedback_loop.py — Daily Post-Market Feedback Collection (Phase 5)
+feedback_loop.py — Daily Post-Market Feedback Collection (Phase 5 + v13 upgrade)
+
+v13 changes (from audit):
+  Fix 2: `{symbol in signal}` bug → replaced with `{in_watchlist}` (was always False)
+  Fix 3: fetch 3 real headlines per symbol, pass to _groq_analyse_mover()
+  NEW:   alpha-beta separation — every stored outcome = trade_return - (spy_return × beta)
+  NEW:   9 label types (correct_peak_exit, caught_falling_knife, etc.)
+  NEW:   regime field on every record (for regime-matched RAG queries)
+  NEW:   regime-matched ChromaDB query — RAG now filters by regime, not just symbol
 
 Runs automatically at 4:30 PM US/Eastern every trading day (configured via cron).
 
-What it does:
-  1. Fetches the top 20 movers of the day (via yfinance or TV screener)
-  2. For each mover: checks if it was in our universe / watchlist / positions
-  3. Calls Groq: "Was this move repeatable? What drove it?"
-  4. Stores a structured record to ChromaDB (vector DB for RAG)
-     and a plain JSONL file (human-readable audit trail)
-
 Records stored per day:
-  - True positives (we signalled, stock moved as expected)
-  - False positives (we signalled, stock moved wrong)
-  - True negatives (we didn't signal, stock moved wrong — expected)
-  - Missed opportunities (we missed, stock moved)
+  - true_positive, false_positive, true_negative, missed (original 4)
+  - correct_peak_exit, early_exit, late_exit (exit labels)
+  - correct_dip_buy, caught_falling_knife (dip labels)
+  - correct_accumulate, correct_hold, correct_scale_up, premature_scale_up (new)
 
-The monthly model updater (`data/model_updater.py`) reads these records,
-applies 4 noise-removal filters, and retrains LightGBM on validated samples.
+ChromaDB collections:
+  feedback_records (existing) — entry cases, queried with regime-matching
+  exit_records (new)          — exit cases
+  dip_records  (new)          — dip cases
 
 Usage:
   python -m data.feedback_loop        # run immediately (one shot)
   python -m data.feedback_loop --dry  # print what would be collected, no writes
-
-ChromaDB is used as the RAG store. Groq retrieves 5 similar past cases from
-ChromaDB before analysing any new signal (see strategy/consensus.py prompt).
 """
 
 import asyncio
@@ -38,11 +38,19 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-FEEDBACK_LOG_PATH = Path("logs/feedback_loop.jsonl")
-CHROMA_COLLECTION = "feedback_records"
-GROQ_MODEL = "llama-3.3-70b-versatile"
-TOP_N_MOVERS = 20
-MAX_PCT_MOVE = 50.0  # exclude >50% single-day moves (meme/squeeze outliers)
+FEEDBACK_LOG_PATH  = Path("logs/feedback_loop.jsonl")
+CHROMA_COLLECTION  = "feedback_records"
+EXIT_COLLECTION    = "exit_records"
+DIP_COLLECTION     = "dip_records"
+GROQ_MODEL         = "llama-3.3-70b-versatile"
+TOP_N_MOVERS       = 20
+MAX_PCT_MOVE       = 50.0  # exclude >50% single-day moves (meme/squeeze outliers)
+
+# v13: 9 label types (in addition to the original 4 outcome_type values)
+ENTRY_LABELS = ["true_positive", "false_positive", "true_negative", "missed", "neutral"]
+EXIT_LABELS  = ["correct_peak_exit", "early_exit", "late_exit", "correct_hold"]
+DIP_LABELS   = ["correct_dip_buy", "caught_falling_knife", "correct_accumulate"]
+TRANCHE_LABELS = ["correct_scale_up", "premature_scale_up"]
 
 
 class FeedbackCollector:
@@ -240,48 +248,64 @@ class FeedbackCollector:
         else:
             outcome_type = "neutral"
 
-        # Groq analysis
-        groq_analysis = await self._groq_analyse_mover(symbol, mover, signal)
+        # v13 Fix 3: fetch 3 real headlines per symbol and pass to Groq
+        headlines = await self._fetch_headlines(symbol)
+
+        # v13: alpha-beta separation
+        alpha = self._compute_alpha(symbol, pct)
+
+        # v13: regime for regime-matched RAG
+        regime = self._get_current_regime()
+
+        # v13 Fix 2: was `{symbol in signal}` (always False bug) → now `{in_watchlist}`
+        groq_analysis = await self._groq_analyse_mover(symbol, mover, signal, headlines, in_watchlist)
 
         return {
-            "date": date.today().isoformat(),
-            "symbol": symbol,
-            "pct_change": pct,
-            "close": mover["close"],
+            "date":         date.today().isoformat(),
+            "symbol":       symbol,
+            "pct_change":   pct,
+            "close":        mover["close"],
             "volume_ratio": mover.get("volume_ratio", 1.0),
             "in_watchlist": in_watchlist,
             "in_positions": in_positions,
             "outcome_type": outcome_type,
-            "signal": signal.get("signal", "NONE"),
-            "lgbm_score": signal.get("normalised_score", None),
+            "signal":       signal.get("signal", "NONE"),
+            "lgbm_score":   signal.get("normalised_score", None),
+            "alpha":        alpha,                           # v13: beta-adjusted excess return
+            "regime":       regime,                          # v13: for regime-matched RAG
+            "headlines":    headlines[:3],                   # v13: real news context
             "groq_analysis": groq_analysis,
-            "recorded_at": datetime.utcnow().isoformat(),
+            "recorded_at":  datetime.utcnow().isoformat(),
         }
 
     async def _groq_analyse_mover(
-        self, symbol: str, mover: dict, signal: dict
+        self, symbol: str, mover: dict, signal: dict,
+        headlines: list, in_watchlist: bool
     ) -> dict:
-        """Ask Groq whether the move was repeatable and what drove it."""
+        """Ask Groq whether the move was repeatable and what drove it.
+
+        v13 Fix 2: `in_watchlist` replaces `{symbol in signal}` (was always False).
+        v13 Fix 3: Real headlines are passed in (fetched before this call).
+        """
         client = self._get_groq_client()
         if client is None:
             return {}
 
-        pct = mover["pct_change"]
-        prompt = f"""A stock moved {pct:+.1f}% today.
+        pct           = mover["pct_change"]
+        headline_str  = "\n".join(f"  - {h}" for h in headlines[:3]) if headlines else "  (none)"
 
-Stock: {symbol}
-Our signal: {signal.get('signal', 'NONE')} (score: {signal.get('normalised_score', 'N/A')})
-Was in watchlist: {symbol in signal}
-
-Answer in JSON:
-{{
-  "repeatable": true/false,
-  "catalyst": "one-sentence explanation of what drove the move",
-  "catalyst_type": "earnings|fda|partnership|macro|technical|squeeze|unknown",
-  "lesson": "one takeaway for improving our model"
-}}
-
-Return only valid JSON, no markdown."""
+        system_prompt = "You are a quantitative analyst. Analyse today's market move. Return JSON only."
+        user_prompt   = (
+            f"Stock: {symbol}\n"
+            f"Move: {pct:+.1f}% today\n"
+            f"Our signal: {signal.get('signal', 'NONE')} (score: {signal.get('normalised_score', 'N/A')})\n"
+            f"Was in watchlist: {in_watchlist}\n\n"       # Fix 2: was `{symbol in signal}` (always False)
+            f"Today's headlines:\n{headline_str}\n\n"     # Fix 3: real headlines
+            f'Return JSON: {{"repeatable": true/false, '
+            f'"catalyst": "one sentence", '
+            f'"catalyst_type": "earnings|fda|partnership|macro|technical|squeeze|unknown", '
+            f'"lesson": "one takeaway"}}'
+        )
 
         try:
             loop = asyncio.get_event_loop()
@@ -289,19 +313,74 @@ Return only valid JSON, no markdown."""
                 None,
                 lambda: client.chat.completions.create(
                     model=GROQ_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": user_prompt},
+                    ],
                     temperature=0.1,
                     max_tokens=200,
                 ),
             )
             content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
+            content = content.lstrip("```json").lstrip("```").rstrip("```").strip()
             return json.loads(content)
         except Exception:
             return {}
+
+    async def _fetch_headlines(self, symbol: str) -> list:
+        """Fetch up to 3 real headlines for symbol via Google News RSS (Fix 3)."""
+        try:
+            from data.sources.seeking_alpha import _fetch_google_news  # type: ignore
+            articles = _fetch_google_news(symbol, limit=3)
+            return [a["title"] for a in articles if a.get("title")]
+        except Exception:
+            return []
+
+    def _compute_alpha(self, symbol: str, trade_return_pct: float) -> Optional[float]:
+        """Beta-adjusted excess return: alpha = trade_return - (spy_return × beta).
+
+        v13: Every stored outcome is beta-adjusted to measure edge, not bull-market luck.
+        """
+        try:
+            import yfinance as yf
+            from datetime import date, timedelta
+            end   = date.today()
+            start = end - timedelta(days=5)
+
+            spy_data    = yf.download("SPY", start=start, end=end, progress=False, auto_adjust=True)
+            sym_data    = yf.download(symbol, start=start, end=end, progress=False, auto_adjust=True)
+
+            if spy_data.empty or sym_data.empty:
+                return None
+
+            spy_return   = float((spy_data["Close"].iloc[-1] / spy_data["Close"].iloc[0]) - 1)
+            stock_return = trade_return_pct / 100
+
+            # Beta approximation from 1-year correlation
+            hist_spy = yf.download("SPY", period="1y", progress=False, auto_adjust=True)["Close"].pct_change().dropna()
+            hist_sym = yf.download(symbol, period="1y", progress=False, auto_adjust=True)["Close"].pct_change().dropna()
+            aligned  = hist_spy.align(hist_sym, join="inner")
+            if len(aligned[0]) < 30:
+                beta = 1.0
+            else:
+                import numpy as np
+                cov  = float(np.cov(aligned[0], aligned[1])[0, 1])
+                var  = float(aligned[0].var())
+                beta = cov / (var + 1e-9)
+
+            alpha = stock_return - (spy_return * beta)
+            return round(alpha, 5)
+        except Exception:
+            return None
+
+    def _get_current_regime(self) -> str:
+        """Get current market regime for regime-matched RAG."""
+        try:
+            from strategy.regime_detector import RegimeDetector  # type: ignore
+            rd = RegimeDetector()
+            return str(rd.get_current_regime())
+        except Exception:
+            return "NEUTRAL"
 
     # ── Step 4: Persist ───────────────────────────────────────────────────────
 
@@ -334,6 +413,8 @@ Return only valid JSON, no markdown."""
                 "pct_change":   r["pct_change"],
                 "catalyst_type": r.get("groq_analysis", {}).get("catalyst_type", "unknown"),
                 "repeatable":   str(r.get("groq_analysis", {}).get("repeatable", False)),
+                "regime":       r.get("regime", "NEUTRAL"),   # v13: regime for RAG matching
+                "alpha":        str(r.get("alpha", "")),       # v13: beta-adjusted outcome
             })
             ids.append(doc_id)
 
@@ -382,36 +463,64 @@ Return only valid JSON, no markdown."""
 
 # ── Query helpers (used by model_updater.py and Groq RAG) ────────────────────
 
-def query_similar_setups(symbol: str, outcome_filter: Optional[str] = None, n_results: int = 5) -> List[dict]:
+def query_similar_setups(
+    symbol:         str,
+    outcome_filter: Optional[str] = None,
+    regime:         Optional[str] = None,   # v13: regime-matched RAG
+    n_results:      int = 5,
+) -> List[dict]:
     """Retrieve past feedback records similar to the given symbol from ChromaDB.
 
+    v13: regime parameter filters to same-regime cases for RAG (regime-matched RAG).
+    Same RSI/MACD setup in MID_BULL vs LATE_BULL → different expected outcome.
+
     Used by Groq prompts to add system-specific memory:
-    "Last 3 times NVDA had this setup: outcomes were X, Y, Z"
+    "Last 3 times NVDA had this setup in MID_BULL: outcomes were X, Y, Z"
 
     Parameters
     ----------
-    symbol       : ticker to query
+    symbol         : ticker to query
     outcome_filter : if set, only return records with this outcome_type
-    n_results    : max number of records to return
-
-    Returns list of metadata dicts from ChromaDB.
+    regime         : if set, filter to records from same regime (e.g. "MID_BULL")
+    n_results      : max number of records to return
     """
     try:
         import chromadb  # type: ignore
         chroma_path = "data/chromadb"
-        client = chromadb.PersistentClient(path=chroma_path)
-        collection = client.get_collection(CHROMA_COLLECTION)
+        client      = chromadb.PersistentClient(path=chroma_path)
+        collection  = client.get_collection(CHROMA_COLLECTION)
 
-        where = {"symbol": symbol}
+        # Build where filter — regime-matched first, symbol fallback
+        where_conditions = []
+        if regime:
+            where_conditions.append({"regime": {"$eq": regime}})
         if outcome_filter:
-            where["outcome_type"] = outcome_filter  # type: ignore
+            where_conditions.append({"outcome_type": {"$eq": outcome_filter}})
+
+        if len(where_conditions) > 1:
+            where = {"$and": where_conditions}
+        elif len(where_conditions) == 1:
+            where = where_conditions[0]
+        else:
+            where = {"symbol": {"$eq": symbol}}
 
         results = collection.query(
             query_texts=[f"Symbol: {symbol}"],
             n_results=n_results,
-            where=where if where else None,
+            where=where,
         )
-        return results.get("metadatas", [[]])[0]
+        records = results.get("metadatas", [[]])[0]
+
+        # Fallback to symbol-only if regime-matched returns nothing
+        if not records and regime:
+            results = collection.query(
+                query_texts=[f"Symbol: {symbol}"],
+                n_results=n_results,
+                where={"symbol": {"$eq": symbol}},
+            )
+            records = results.get("metadatas", [[]])[0]
+
+        return records
     except Exception:
         return []
 

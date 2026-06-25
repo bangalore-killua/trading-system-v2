@@ -2,27 +2,35 @@
 screener.py — Multi-Method Universe Builder + Factor Scoring
 
 Builds a candidate universe of stocks using 4 parallel discovery methods,
-then scores each candidate with 5 percentile-based factor scores.
+then scores each candidate with factor scores (all 0-1 normalized in v13).
 
-The 5 factor scores become INPUT FEATURES for LightGBM — they do NOT filter
-stocks out. LightGBM learns which combination of scores matters.
+The factor scores become INPUT FEATURES for LightGBM/AutoGluon — they do NOT filter
+stocks out. The model learns which combination of scores matters.
+
+v13 additions:
+  options_score   — Unusual Whales call/put ratio (0-1) — leading indicator
+  macro_score     — FRED yield curve + VIX composite (0-1) — regime input
+  insider_score   — Net insider buy 3m (0-1) + congressional trades (0-1)
 
 Discovery methods:
-  1. Knowledge graph expansion  — supply chain / ecosystem stocks (APLD via NVDA)
+  1. Knowledge graph expansion  — supply chain / ecosystem stocks
   2. Theme baskets              — ETF components across 10 diversified themes
   3. Momentum expansion         — any stock > 40% 3-month return, any market cap
   4. User seeds                 — manually pinned symbols from config.json
 
-Factor scores (all percentile-based, 0–100):
+Factor scores (all 0-1 normalized, not 0-100 percentile):
   momentum_score   — 12-1 month return vs sector peers
-  quality_score    — ROE + FCF margin vs sector (higher = better business quality)
-  technical_score  — RSI percentile + price above key MAs vs stock's own history
-  valuation_score  — P/E vs sector peers (lower P/E = better value = higher score)
+  quality_score    — ROE + FCF margin vs sector
+  technical_score  — RSI percentile + price above key MAs
+  valuation_score  — P/E vs sector (lower P/E = higher score)
   news_score       — FinBERT aggregate score last 7 days
+  options_score    — call/put premium ratio (Unusual Whales)    [v13]
+  macro_score      — yield curve + VIX composite from FRED      [v13]
+  insider_score    — net insider + congressional trade signal    [v13]
 
 Usage:
   screener = UniverseScreener(config)
-  candidates = await screener.build_universe()  # returns list of dicts
+  candidates = await screener.build_universe()
   factor_scores = await screener.compute_factor_scores(["NVDA", "AAPL"])
 """
 
@@ -227,12 +235,13 @@ class UniverseScreener:
     # ── Factor Scoring ────────────────────────────────────────────────────────
 
     async def compute_factor_scores(self, symbols: List[str]) -> Dict[str, dict]:
-        """Compute all 5 percentile-based factor scores for a list of symbols.
+        """Compute all 8 factor scores for a list of symbols.
 
         Returns dict: {symbol → {momentum_score, quality_score, technical_score,
-                                  valuation_score, news_score}}
+                                  valuation_score, news_score,
+                                  options_score, macro_score, insider_score}}
 
-        These 5 scores become new LightGBM features (added to the 130 existing ones).
+        Scores are 0-1 normalized (not 0-100 percentile) in v13.
         """
         tasks = [self._score_single(sym) for sym in symbols]
         results_list = await asyncio.gather(*tasks, return_exceptions=True)
@@ -300,18 +309,50 @@ class UniverseScreener:
             sector_pes = [s_info.get("trailingPE") for s_info in self._get_sector_infos(symbol)]
             valuation_score = sector_percentile(pe, sector_pes, higher_is_better=False)
 
-            # ── News score: FinBERT aggregate last 7 days ──────────────────
-            news_data = self._news_cache.get(symbol.upper(), {})
+            # ── News score: FinBERT aggregate last 7 days (0-1 in v13) ───────
+            news_data   = self._news_cache.get(symbol.upper(), {})
             finbert_raw = news_data.get("finbert_score")
-            # FinBERT score is in [-1, 1]; convert to 0-100 percentile
-            news_score = ((finbert_raw + 1) / 2 * 100) if finbert_raw is not None else 50.0
+            news_score  = ((finbert_raw + 1) / 2) if finbert_raw is not None else 0.5
 
+            # ── v13: Options score (Unusual Whales call/put ratio) ─────────────
+            options_score = 0.5
+            try:
+                from data.sources.unusual_whales import UnusualWhales, compute_options_score  # type: ignore
+                data, _, _ = UnusualWhales().get(symbol)
+                options_score = compute_options_score(data)
+            except Exception:
+                pass
+
+            # ── v13: Macro score (FRED — shared across all symbols in batch) ──
+            macro_score = 0.5
+            try:
+                from data.sources.fred_macro import get_macro_signals  # type: ignore
+                macro  = get_macro_signals()
+                macro_score = macro.get("macro_score", 0.5)
+            except Exception:
+                pass
+
+            # ── v13: Insider score (Form 4 insider + congressional trades) ────
+            insider_score = 0.5
+            try:
+                from data.fincept.congressional_trades import (  # type: ignore
+                    get_congressional_trades, compute_congressional_score,
+                )
+                cong_trades   = get_congressional_trades(symbol)
+                insider_score = compute_congressional_score(cong_trades)
+            except Exception:
+                pass
+
+            # Normalize legacy 0-100 scores to 0-1
             return {
-                "momentum_score": round(momentum_score, 1),
-                "quality_score": round(quality_score, 1),
-                "technical_score": round(technical_score, 1),
-                "valuation_score": round(valuation_score, 1),
-                "news_score": round(news_score, 1),
+                "momentum_score":  round(momentum_score / 100, 3),
+                "quality_score":   round(quality_score / 100, 3),
+                "technical_score": round(technical_score / 100, 3),
+                "valuation_score": round(valuation_score / 100, 3),
+                "news_score":      round(news_score, 3),
+                "options_score":   round(options_score, 3),
+                "macro_score":     round(macro_score, 3),
+                "insider_score":   round(insider_score, 3),
             }
 
         except Exception:
@@ -320,11 +361,14 @@ class UniverseScreener:
 
     def _neutral_scores(self) -> dict:
         return {
-            "momentum_score": 50.0,
-            "quality_score": 50.0,
-            "technical_score": 50.0,
-            "valuation_score": 50.0,
-            "news_score": 50.0,
+            "momentum_score":  0.5,
+            "quality_score":   0.5,
+            "technical_score": 0.5,
+            "valuation_score": 0.5,
+            "news_score":      0.5,
+            "options_score":   0.5,
+            "macro_score":     0.5,
+            "insider_score":   0.5,
         }
 
     def _get_sector_peers(self, symbol: str) -> List[str]:

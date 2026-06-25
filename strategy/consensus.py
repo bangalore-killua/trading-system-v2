@@ -1,9 +1,37 @@
 """
-consensus.py — ML + LLM Consensus Layer (Phase 4)
+consensus.py — ML + LLM Consensus Layer (Phase 4 + v13 upgrade)
 
-Combines LightGBM's P(win) score with Groq's verdict on the same signal
-to produce a STRONG_BUY / BUY / CONFLICT / SKIP decision and a position
-size multiplier.
+Combines LightGBM/AutoGluon P(win) score with LLM verdict to produce a
+STRONG_BUY / BUY / CONFLICT / SKIP decision and a position size multiplier.
+
+v13 additions (Fix 1 from audit + new verdicts):
+  - RAG: 3 past cases from ChromaDB, filtered by current regime (regime-matched)
+  - system/user prompt split (not single-string prompt)
+  - company name + headline context passed to LLM
+  - exit_verdict()   — Claude Haiku, decides hold/sell_partial/sell_all
+  - dip_verdict()    — Claude Haiku, decides buy_dip/accumulate/avoid
+  - tranche_verdict()— Groq (routine/high-volume), decides add/hold/reduce
+  - Claude routing: Groq (routine), Haiku (exit/dip), Sonnet (final synthesis)
+
+Decision table:
+  LightGBM   Groq       Consensus    Size multiplier
+  ─────────  ─────────  ──────────   ───────────────
+  BUY        bullish    STRONG_BUY   1.00
+  BUY        neutral    BUY          0.75
+  BUY        bearish    CONFLICT     0.25
+  SKIP       bullish    CONFLICT     0.25
+  SKIP       neutral    SKIP         0.00
+  SKIP       bearish    SKIP         0.00
+
+Priority rules:
+  - ML wins in normal regime (no strong catalyst)
+  - LLM wins when catalyst_present=True or when regime is transitioning
+  - CONFLICT is always logged with LLM's full reasoning for audit
+
+AI cost routing:
+  Groq  (routine, free):  tranche_verdict, quick consensus checks
+  Haiku (~$0.72/mo):      exit_verdict, dip_verdict, research
+  Sonnet (~$2/mo):        final orchestrator synthesis only
 
 Decision table:
   LightGBM   Groq       Consensus    Size multiplier
@@ -35,7 +63,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL   = "llama-3.3-70b-versatile"
+HAIKU_MODEL  = "claude-haiku-4-5-20251001"
+SONNET_MODEL = "claude-sonnet-4-6"
 
 CONFLICT_LOG_PATH = Path("logs/consensus_conflicts.jsonl")
 
@@ -179,6 +209,97 @@ class ConsensusEngine:
         else:
             return SKIP
 
+    # ── v13: Exit / Dip / Tranche verdicts ───────────────────────────────────
+
+    async def exit_verdict(self, symbol: str, position_data: dict) -> dict:
+        """Claude Haiku — decide whether to exit an open position.
+
+        Parameters
+        ----------
+        position_data : {unrealized_pnl_pct, days_held, regime, news_since_entry,
+                         peak_drawdown_pct, entry_composite_score}
+
+        Returns
+        -------
+        {"action": "hold|sell_partial|sell_all", "urgency": "immediate|next_open|no_rush",
+         "reasoning": str}
+        """
+        from data.fincept.agents.research_agent import ResearchAgent  # type: ignore
+        agent = ResearchAgent()
+        result = await __import__("asyncio").get_event_loop().run_in_executor(
+            None, lambda: agent.exit_verdict(symbol, position_data)
+        )
+        logger.info("exit_verdict %s: %s", symbol, result.get("action"))
+        return result
+
+    async def dip_verdict(self, symbol: str, dip_data: dict) -> dict:
+        """Claude Haiku — evaluate whether a price dip is a buy opportunity.
+
+        Parameters
+        ----------
+        dip_data : {drop_pct, drop_speed_days, cause, regime, quality_score,
+                    insider_activity, eps_beat_streak}
+
+        Returns
+        -------
+        {"verdict": "buy_dip|accumulate|avoid", "conviction": "high|medium|low",
+         "reasoning": str}
+        """
+        from data.fincept.agents.research_agent import ResearchAgent  # type: ignore
+        agent = ResearchAgent()
+        result = await __import__("asyncio").get_event_loop().run_in_executor(
+            None, lambda: agent.dip_verdict(symbol, dip_data)
+        )
+        logger.info("dip_verdict %s: %s (%s)", symbol, result.get("verdict"), result.get("conviction"))
+        return result
+
+    async def tranche_verdict(self, symbol: str, position_data: dict) -> dict:
+        """Groq (routine, free) — decide tranche add/hold/reduce.
+
+        Parameters
+        ----------
+        position_data : {current_pnl, composite_score, tranche_level, available_cash_pct,
+                         momentum_confirming, atr_threshold_hit}
+
+        Returns
+        -------
+        {"action": "add_tranche|hold|reduce", "reasoning": str}
+        """
+        client = self._get_groq_client()
+        if client is None:
+            return {"action": "hold", "reasoning": "Groq unavailable"}
+
+        prompt = (
+            f"Symbol: {symbol}\n"
+            f"Position: {json.dumps(position_data, default=str)}\n\n"
+            f"Should we add a tranche (scale up), hold, or reduce? "
+            f"Reply JSON only: {{\"action\": \"add_tranche|hold|reduce\", \"reasoning\": \"one sentence\"}}"
+        )
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[
+                        {"role": "system", "content": "You are a position sizing assistant. Reply JSON only."},
+                        {"role": "user",   "content": prompt},
+                    ],
+                    temperature=0.0,
+                    max_tokens=100,
+                ),
+            )
+            raw = response.choices[0].message.content.strip().lstrip("```json").lstrip("```").rstrip("```")
+            result = json.loads(raw)
+            logger.info("tranche_verdict %s: %s", symbol, result.get("action"))
+            return result
+        except Exception as e:
+            logger.debug("tranche_verdict Groq call failed: %s", e)
+            return {"action": "hold", "reasoning": "unavailable"}
+
+    # ── v13: RAG-enhanced Groq prompt (Fix 1 from audit) ─────────────────────
+
     async def _get_groq_verdict(
         self,
         symbol: str,
@@ -189,38 +310,42 @@ class ConsensusEngine:
     ) -> tuple[str, str]:
         """Ask Groq for a bullish/neutral/bearish verdict on the signal.
 
+        v13 fix: system/user split + company name + headlines + regime-matched RAG.
         Returns (verdict: str, reasoning: str).
-        Falls back to 'neutral' with empty reasoning if Groq is unavailable.
         """
         client = self._get_groq_client()
         if client is None:
             return "neutral", ""
 
-        # Build a compact context for the prompt
+        # ── RAG: 3 regime-matched past cases from ChromaDB ────────────────────
+        rag_context = self._fetch_rag_context(signal_data, regime, n=3)
+
+        # ── Build context ─────────────────────────────────────────────────────
+        company_name = signal_data.get("company_name", symbol)
+        headlines    = signal_data.get("headlines", [])
+        headline_str = "\n".join(f"  - {h}" for h in headlines[:5]) if headlines else "  (none)"
+
         context_lines = []
         for key in ("rsi", "price_vs_50ma", "volume_ratio", "adx", "finbert_score",
-                     "news_volume_7d", "threat_level_encoded", "regime_encoded"):
+                     "news_volume_7d", "threat_level_encoded", "regime_encoded",
+                     "options_score", "macro_score", "4h_trend", "insider_score"):
             val = signal_data.get(key)
             if val is not None:
                 context_lines.append(f"  {key}: {val}")
 
-        prompt = f"""You are a quantitative trading analyst making a single trade decision.
-
-Symbol: {symbol}
-Market regime: {regime}
-LightGBM P(win): {lgbm_score:.4f} ({lgbm_verdict})
-
-Signal context:
-{chr(10).join(context_lines) if context_lines else '  (no additional context)'}
-
-Based on the technical setup and market regime, give your verdict:
-- Is this trade bullish, neutral, or bearish?
-- What is your key reason in one sentence?
-
-Reply in JSON:
-{{"verdict": "bullish|neutral|bearish", "reasoning": "one sentence explanation"}}
-
-Return only valid JSON, no markdown."""
+        system_prompt = (
+            "You are a quantitative trading analyst. You will be given a signal and recent cases. "
+            "Output JSON only. No markdown, no explanation outside JSON."
+        )
+        user_prompt = (
+            f"Company: {company_name} ({symbol})\n"
+            f"Regime: {regime}\n"
+            f"Model P(win): {lgbm_score:.4f} ({lgbm_verdict})\n\n"
+            f"Signal context:\n" + ("\n".join(context_lines) or "  (none)") + "\n\n"
+            f"Recent headlines:\n{headline_str}\n\n"
+            f"Similar past cases (same regime):\n{rag_context}\n\n"
+            f"Verdict: {{\"verdict\": \"bullish|neutral|bearish\", \"reasoning\": \"one sentence\"}}"
+        )
 
         try:
             import asyncio
@@ -229,28 +354,48 @@ Return only valid JSON, no markdown."""
                 None,
                 lambda: client.chat.completions.create(
                     model=GROQ_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": user_prompt},
+                    ],
                     temperature=0.0,
                     max_tokens=150,
                 ),
             )
             content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            parsed = json.loads(content)
+            content = content.lstrip("```json").lstrip("```").rstrip("```").strip()
+            parsed  = json.loads(content)
             verdict = parsed.get("verdict", "neutral").lower()
             if verdict not in ("bullish", "neutral", "bearish"):
                 verdict = "neutral"
-            reasoning = parsed.get("reasoning", "")
-            return verdict, reasoning
+            return verdict, parsed.get("reasoning", "")
         except json.JSONDecodeError:
-            logger.debug("Groq returned non-JSON verdict for %s", symbol)
+            logger.debug("Groq returned non-JSON for %s", symbol)
             return "neutral", ""
         except Exception:
             logger.debug("Groq verdict failed for %s", symbol, exc_info=True)
             return "neutral", ""
+
+    def _fetch_rag_context(self, signal_data: dict, regime: str, n: int = 3) -> str:
+        """Fetch n regime-matched past cases from ChromaDB for RAG prompt injection."""
+        try:
+            import chromadb  # type: ignore
+            client = chromadb.PersistentClient(path="data/chromadb")
+            coll   = client.get_collection("feedback_records")
+
+            composite = signal_data.get("composite_score", 0.5)
+            results   = coll.query(
+                query_texts=[str(composite)],
+                where={"regime": {"$eq": regime}},
+                n_results=n,
+            )
+            docs = results.get("documents", [[]])[0]
+            if not docs:
+                return "  (no past cases in this regime)"
+            return "\n".join(f"  Case {i+1}: {d[:150]}" for i, d in enumerate(docs))
+        except Exception as e:
+            logger.debug("RAG fetch failed: %s", e)
+            return "  (RAG unavailable)"
 
     def _get_groq_client(self):
         if self._groq_client is not None:

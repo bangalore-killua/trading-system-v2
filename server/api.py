@@ -1512,15 +1512,26 @@ def performance_daily(days: int = 30):
 
 @app.get("/api/news")
 def get_news(hours: int = 24, ticker: str = "", limit: int = 60):
-    """Recent articles from all 39 RSS sources + OpenBB, with FinBERT sentiment."""
+    """Recent articles — existing 39 RSS sources + PRNewswire + BusinessWire, with FinBERT sentiment.
+
+    v13: adds PRNewswire and BusinessWire (credibility=1.0, 22-minute alpha advantage).
+    If ticker is specified, also fetches Google News for that symbol.
+    Deduplicates by URL; PRNewswire/BusinessWire articles kept over duplicates from Google News.
+    """
     try:
         from data.news_aggregator import get_news_aggregator
-        agg = get_news_aggregator()
+        agg     = get_news_aggregator()
         tickers = [t.strip().upper() for t in ticker.split(",") if t.strip()] if ticker else None
         articles = agg.get_recent_articles(hours=hours, tickers=tickers)[:limit]
-        now = datetime.utcnow()
+        now  = datetime.utcnow()
         data = []
+        seen_urls: set = set()
+
+        # Primary: existing 39 RSS sources
         for a in articles:
+            if a.url in seen_urls:
+                continue
+            seen_urls.add(a.url)
             age_s = int((now - a.published_at).total_seconds())
             age_label = (
                 f"{age_s // 3600}h ago" if age_s >= 3600
@@ -1536,8 +1547,75 @@ def get_news(hours: int = 24, ticker: str = "", limit: int = 60):
                 "sentiment":    round(a.sentiment, 3),
                 "threat":       a.threat,
                 "tickers":      a.tickers,
+                "credibility":  1.0,
             })
-        return {"status": "ok", "count": len(data), "data": data}
+
+        # v13: PRNewswire + BusinessWire (credibility=1.0)
+        try:
+            from data.sources.prnewswire import get_prnewswire_for_symbol, get_prnewswire
+            from data.sources.businesswire import get_businesswire_for_symbol, get_businesswire
+            if tickers:
+                for sym in tickers[:3]:
+                    pr_articles = get_prnewswire_for_symbol(sym, limit=5)
+                    bw_articles = get_businesswire_for_symbol(sym, limit=5)
+                    for a in pr_articles + bw_articles:
+                        if a.get("url") not in seen_urls:
+                            seen_urls.add(a["url"])
+                            data.insert(0, {  # prepend — highest priority
+                                "title":        a.get("title", ""),
+                                "url":          a.get("url", ""),
+                                "source":       a.get("source", "prnewswire"),
+                                "published_at": a.get("published", now.isoformat()),
+                                "age_label":    "recent",
+                                "sentiment":    0.0,
+                                "threat":       False,
+                                "tickers":      [sym],
+                                "credibility":  a.get("credibility", 1.0),
+                            })
+            else:
+                pr_general = get_prnewswire(limit=10)
+                bw_general = get_businesswire(limit=10)
+                for a in pr_general + bw_general:
+                    if a.get("url") not in seen_urls:
+                        seen_urls.add(a["url"])
+                        data.insert(0, {
+                            "title":        a.get("title", ""),
+                            "url":          a.get("url", ""),
+                            "source":       a.get("source", "prnewswire"),
+                            "published_at": a.get("published", now.isoformat()),
+                            "age_label":    "recent",
+                            "sentiment":    0.0,
+                            "threat":       False,
+                            "tickers":      [],
+                            "credibility":  a.get("credibility", 1.0),
+                        })
+        except Exception:
+            pass  # PR/BW fetch failure is non-fatal
+
+        # v13: Google News for ticker-specific requests (credibility=0.60)
+        if tickers:
+            try:
+                from data.fincept.google_news import get_google_news
+                for sym in tickers[:2]:
+                    gn_articles = get_google_news(sym, limit=8)
+                    for a in gn_articles:
+                        if a.get("url") not in seen_urls:
+                            seen_urls.add(a["url"])
+                            data.append({
+                                "title":        a.get("title", ""),
+                                "url":          a.get("url", ""),
+                                "source":       "google_news",
+                                "published_at": a.get("published", now.isoformat()),
+                                "age_label":    "recent",
+                                "sentiment":    0.0,
+                                "threat":       False,
+                                "tickers":      [sym],
+                                "credibility":  0.60,
+                            })
+            except Exception:
+                pass
+
+        return {"status": "ok", "count": len(data), "data": data[:limit]}
     except Exception as e:
         return {"status": "error", "message": str(e), "data": []}
 
@@ -1812,6 +1890,178 @@ def get_stock_detail(symbol: str):
         }
     except Exception as e:
         return {"status": "error", "message": str(e), "data": {}}
+
+
+# ── v13: Analysis / Earnings / Financials / Holdings tabs ─────
+
+@app.get("/api/analysis/{symbol}")
+def get_symbol_analysis(symbol: str):
+    """Analyst consensus, price targets, and Claude Haiku bear/base/bull scenarios.
+
+    Returns
+    -------
+    {
+      "recommendations": [...], "price_target": {...},
+      "recommendation_mean": float, "recommendation_key": str,
+      "scenarios": {"bear": str, "base": str, "bull": str}
+    }
+    """
+    try:
+        symbol = symbol.upper().strip()
+        from data.fincept.yfinance_data import get_analysis
+        data   = get_analysis(symbol)
+
+        # Claude Haiku 3/6/9/12-month scenarios (non-blocking — returns empty if unavailable)
+        scenarios = {}
+        try:
+            import os
+            key = os.getenv("ANTHROPIC_API_KEY")
+            if key:
+                import anthropic  # type: ignore
+                client = anthropic.Anthropic(api_key=key)
+                pt     = data.get("price_target", {})
+                recs   = data.get("recommendations", [])[:5]
+                prompt = (
+                    f"Stock: {symbol}\n"
+                    f"Analyst mean PT: {pt.get('mean')} | High: {pt.get('high')} | Low: {pt.get('low')}\n"
+                    f"Recent ratings: {[(r['firm'], r['to_grade']) for r in recs]}\n\n"
+                    "Give 3–12 month bear/base/bull price scenarios in one sentence each. "
+                    "Format: BEAR: ... BASE: ... BULL: ..."
+                )
+                msg   = client.messages.create(
+                    model="claude-haiku-4-5-20251001", max_tokens=200,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                raw = msg.content[0].text
+                for label in ("BEAR", "BASE", "BULL"):
+                    import re
+                    m = re.search(rf"{label}:\s*(.+?)(?=(?:BEAR|BASE|BULL):|$)", raw, re.I | re.S)
+                    if m:
+                        scenarios[label.lower()] = m.group(1).strip()
+        except Exception:
+            pass
+
+        data["scenarios"] = scenarios
+        return {"status": "ok", "symbol": symbol, "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {}}
+
+
+@app.get("/api/earnings/{symbol}")
+def get_symbol_earnings(symbol: str):
+    """8-quarter earnings history with beat/miss + next earnings date.
+
+    Returns
+    -------
+    {
+      "quarterly": [{date, actual_eps, estimate_eps, revenue, surprise_pct}],
+      "next_earnings_date": str | None,
+      "trailing_eps": float,  "forward_eps": float,
+      "filings": [{type, date, url}]   (from SEC 8-K / EX-99)
+    }
+    """
+    try:
+        symbol = symbol.upper().strip()
+        from data.fincept.yfinance_data import get_earnings_data
+        data   = get_earnings_data(symbol)
+
+        # Attach SEC filing links (8-K, EX-99) for earnings context
+        try:
+            from data.fincept.sec_data import get_filings
+            filings = get_filings(symbol, forms="8-K,EX-99.1", limit=6)
+            data["filings"] = filings
+        except Exception:
+            data["filings"] = []
+
+        return {"status": "ok", "symbol": symbol, "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {}}
+
+
+@app.get("/api/financials/{symbol}")
+def get_symbol_financials(symbol: str, period: str = "quarterly"):
+    """Detailed income statement, balance sheet, and cash flow.
+
+    Query params
+    ------------
+    period : "quarterly" (default) | "annual"
+
+    Returns rows with human-readable numbers (1.23bn, 456.78m).
+    Negatives are signaled via a "negative" boolean for frontend coloring.
+    """
+    try:
+        symbol = symbol.upper().strip()
+        if period not in ("quarterly", "annual"):
+            return {"status": "error", "message": "period must be quarterly or annual"}
+
+        from data.fincept.yfinance_data import get_financials_detailed
+        data = get_financials_detailed(symbol, period=period)
+
+        # Humanize numbers for frontend display
+        def humanize(rows: list) -> list:
+            out = []
+            for row in rows:
+                new_row = {}
+                for k, v in row.items():
+                    if isinstance(v, (int, float)) and v is not None:
+                        new_row[k]              = _fmt_financial(v)
+                        new_row[k + "_raw"]     = v
+                        new_row[k + "_negative"] = v < 0
+                    else:
+                        new_row[k] = v
+                out.append(new_row)
+            return out
+
+        data["income_statement"] = humanize(data.get("income_statement", []))
+        data["balance_sheet"]    = humanize(data.get("balance_sheet", []))
+        data["cash_flow"]        = humanize(data.get("cash_flow", []))
+
+        return {"status": "ok", "symbol": symbol, "period": period, "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {}}
+
+
+@app.get("/api/holdings/{symbol}")
+def get_symbol_holdings(symbol: str):
+    """Institutional holders, mutual funds, insider Form 4, and politicians (STOCK Act).
+
+    Returns
+    -------
+    {
+      "institutional": [{holder, shares, value, pct_held, date_reported}],
+      "mutual_funds":  [{holder, shares, value, pct_held, date_reported}],
+      "insiders":      [{name, title, transaction, shares, value, date}],
+      "politicians":   [{politician, chamber, trade_type, disclosure_date}]
+    }
+    """
+    try:
+        symbol = symbol.upper().strip()
+        from data.fincept.yfinance_data import get_holdings_data
+        data = get_holdings_data(symbol)
+
+        # v13: add congressional STOCK Act trades (6h cache, no API key)
+        try:
+            from data.fincept.congressional_trades import get_congressional_trades
+            data["politicians"] = get_congressional_trades(symbol, days_back=90)
+        except Exception:
+            data["politicians"] = []
+
+        return {"status": "ok", "symbol": symbol, "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": {}}
+
+
+def _fmt_financial(val: float) -> str:
+    """Format financial number: >1B → '1.23bn', >1M → '456.78m', else integer."""
+    if val is None:
+        return ""
+    abs_val = abs(val)
+    sign    = "-" if val < 0 else ""
+    if abs_val >= 1e9:
+        return f"{sign}{abs_val / 1e9:.2f}bn"
+    if abs_val >= 1e6:
+        return f"{sign}{abs_val / 1e6:.2f}m"
+    return f"{sign}{abs_val:,.0f}"
 
 
 # ── Dashboard ─────────────────────────────────────────────────
