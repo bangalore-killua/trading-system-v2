@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>trading-system-v2 — Dashboard Preview</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f1117;color:#e2e8f0;font-size:14px}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:12px 24px;border-bottom:1px solid #1e2433;background:#131722;position:sticky;top:0;z-index:100}
+.topbar-left{display:flex;align-items:center;gap:14px}
+.topbar h1{font-size:14px;font-weight:700;color:#fff;letter-spacing:-.01em}
+.live-dot{width:7px;height:7px;background:#22c55e;border-radius:50%;animation:pulse 2s infinite;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.mode-badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
+.mode-paper{background:#1c3a5e;color:#60a5fa}
+.status-txt{font-size:11px;color:#64748b}
+.ks-btn{padding:5px 14px;border-radius:6px;border:1px solid #374151;font-size:11px;font-weight:700;cursor:pointer;background:#1e2433;color:#94a3b8;letter-spacing:.04em}
+.main{padding:18px 24px}
+.section-gap{margin-bottom:14px}
+.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+.mcard{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:14px 16px}
+.mcard .mlabel{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.mcard .mvalue{font-size:20px;font-weight:700;color:#fff}
+.mcard .msub{font-size:10px;color:#475569;margin-top:3px}
+.up{color:#22c55e!important}
+.down{color:#ef4444!important}
+.neutral{color:#94a3b8!important}
+.regime-bar{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:12px 18px;margin-bottom:14px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.regime-label{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em}
+.regime-val{font-size:13px;font-weight:600;color:#fff}
+.regime-pill{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:#14532d;color:#22c55e}
+.regime-item{display:flex;align-items:center;gap:8px}
+.model-badge{font-size:10px;padding:2px 8px;border-radius:10px;background:#1a3a1a;color:#4ade80;font-weight:700}
+.panel{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:16px}
+.panel-title{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px}
+.sig-row{padding:9px 0;border-bottom:1px solid #1e2433;cursor:pointer}
+.sig-row:last-child{border-bottom:none}
+.sig-top{display:flex;justify-content:space-between;align-items:center}
+.sig-sym{font-weight:700;font-size:13px;color:#fff}
+.sig-price{font-size:11px;color:#64748b;margin-top:2px}
+.sig-right{display:flex;align-items:center;gap:6px}
+.badge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px}
+.badge-BUY,.badge-BUY_MOMENTUM{background:#14532d;color:#22c55e}
+.badge-HOLD,.badge-HOLD_TREND{background:#1e3a5f;color:#60a5fa}
+.badge-SELL{background:#450a0a;color:#ef4444}
+.badge-DEGRADE{background:#431407;color:#fb923c}
+.badge-WATCH{background:#1a2e1a;color:#86efac}
+.pwin-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px}
+.pwin-high{background:#14532d;color:#22c55e}
+.pwin-mid{background:#1a3a1a;color:#86efac}
+.pwin-low{background:#1e2433;color:#64748b}
+.sc-row{display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid #1e243322}
+.sc-row:last-child{border-bottom:none}
+.sc-key{color:#94a3b8}
+.sc-val{font-weight:600;color:#e2e8f0}
+.scorecard{margin-top:10px;padding:10px;background:#0f1117;border-radius:8px;border:1px solid #1e2433}
+.pos-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #1e2433}
+.pos-row:last-child{border-bottom:none}
+.pos-sym{font-weight:700;font-size:13px;color:#fff}
+.pos-meta{font-size:10px;color:#64748b;margin-top:2px}
+.pos-pnl{font-weight:700;font-size:13px;text-align:right}
+.pos-pct{font-size:10px;color:#64748b;text-align:right;margin-top:2px}
+.trade-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #1e2433;font-size:12px}
+.trade-row:last-child{border-bottom:none}
+.t-sym{font-weight:700;color:#fff}
+.t-meta{font-size:10px;color:#64748b;margin-top:2px}
+.t-side-BUY{color:#22c55e;font-weight:700;font-size:11px}
+.t-side-SELL{color:#ef4444;font-weight:700;font-size:11px}
+.news-panel{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:16px;margin-bottom:14px}
+.news-filter-bar{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+.nf-btn{padding:4px 12px;border-radius:20px;border:1px solid #1e2433;background:transparent;color:#94a3b8;font-size:11px;cursor:pointer}
+.nf-btn.active{background:#1e3a5f;border-color:#3b82f6;color:#93c5fd}
+.news-item{padding:10px 0;border-bottom:1px solid #1e2433;display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start}
+.news-item:last-child{border-bottom:none}
+.sent-pill{width:38px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px}
+.sp-bull{background:#14532d;color:#22c55e}
+.sp-bear{background:#450a0a;color:#ef4444}
+.sp-neu{background:#1c1917;color:#64748b}
+.news-headline{font-size:12px;color:#e2e8f0;line-height:1.4;margin-bottom:4px}
+.news-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.news-source{font-size:10px;color:#64748b}
+.news-age{font-size:10px;color:#475569}
+.ticker-chip{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;background:#1e2433;color:#94a3b8}
+.threat-chip{font-size:9px;font-weight:700;padding:1px 7px;border-radius:8px;background:#431407;color:#fb923c}
+.wl-panel{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:16px;margin-bottom:14px}
+.wl-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.wl-chip{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#1e2433;color:#94a3b8}
+.wl-chip.has-pos{background:#14532d;color:#22c55e}
+.wl-chip.has-signal{background:#1e3a5f;color:#60a5fa}
+.wl-add{display:flex;gap:8px}
+.wl-input{flex:1;background:#0f1117;border:1px solid #1e2433;border-radius:6px;padding:7px 12px;color:#fff;font-size:13px;outline:none}
+.wl-input::placeholder{color:#475569}
+.wl-add-btn{background:#3b82f6;border:none;border-radius:6px;padding:7px 18px;color:#fff;font-size:13px;cursor:pointer;font-weight:600}
+.perf-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.pc{background:#0f1117;border:1px solid #1e2433;border-radius:8px;padding:12px;text-align:center}
+.pc-label{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.pc-val{font-size:18px;font-weight:700;color:#fff}
+.section-hdr{font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #1e2433;display:flex;justify-content:space-between;align-items:center}
+.health-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.hc{background:#0f1117;border:1px solid #1e2433;border-radius:8px;padding:12px}
+.hc-label{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.hc-val{font-size:12px;font-weight:600}
+.hc-ok{color:#22c55e}
+.hc-warn{color:#f59e0b}
+.hc-err{color:#ef4444}
+.refresh-row{text-align:right;font-size:11px;color:#64748b;margin-bottom:14px}
+.preview-banner{background:#1e3a1e;border:1px solid #22c55e33;border-radius:8px;padding:8px 16px;margin-bottom:16px;font-size:11px;color:#86efac;display:flex;align-items:center;gap:8px}
+.ins-row,.rat-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #1e2433;font-size:12px}
+.ins-row:last-child,.rat-row:last-child{border-bottom:none}
+.ins-sym,.rat-sym{font-weight:700;color:#fff;min-width:52px}
+.ins-meta,.rat-meta{font-size:10px;color:#64748b;margin-top:2px}
+.ins-side-Buy{color:#22c55e;font-weight:600}
+.ins-side-Sell{color:#ef4444;font-weight:600}
+.rat-action-upgrade{color:#22c55e;font-weight:600}
+.rat-action-initiate{color:#60a5fa;font-weight:600}
+.eco-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #1e2433;font-size:12px}
+.eco-row:last-child{border-bottom:none}
+.eco-event{color:#e2e8f0}
+.eco-impact-high{color:#ef4444;font-weight:700;font-size:10px}
+.eco-impact-med{color:#f59e0b;font-size:10px}
+.eco-time{font-size:10px;color:#64748b}
+.perf-table{width:100%;border-collapse:collapse;font-size:11px}
+.perf-table th{color:#64748b;text-transform:uppercase;font-size:10px;letter-spacing:.05em;padding:6px 8px;text-align:left;border-bottom:1px solid #1e2433}
+.perf-table td{padding:6px 8px;border-bottom:1px solid #1e243322;color:#e2e8f0}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="live-dot"></div>
+    <h1>trading-system-v2</h1>
+    <span class="mode-badge mode-paper">PAPER</span>
+    <span class="status-txt">Updated 09:32:14</span>
+  </div>
+  <div class="topbar-right">
+    <a href="preview_terminal.html" style="font-size:12px;color:#6366f1;text-decoration:none;font-weight:600;margin-right:6px">Terminal →</a>
+    <span style="font-size:12px;color:#64748b">MID_BULL</span>
+    <span class="model-badge">LGB ON</span>
+    <button class="ks-btn">⚡ KILL SWITCH</button>
+  </div>
+</div>
+
+<div class="main">
+
+<div class="preview-banner">
+  ★ Static preview — no server needed. All data is mocked. Open preview_terminal.html for the terminal page.
+</div>
+
+<div class="refresh-row">Auto-refreshes every 60s &nbsp;|&nbsp; <a href="#" style="color:#3b82f6;text-decoration:none">Refresh now</a></div>
+
+<!-- Metric cards -->
+<div class="metrics">
+  <div class="mcard"><div class="mlabel">Cash</div><div class="mvalue">$8,247</div><div class="msub">deployable</div></div>
+  <div class="mcard"><div class="mlabel">Portfolio</div><div class="mvalue">$42,510</div><div class="msub"><span class="up">+12.34%</span> all time</div></div>
+  <div class="mcard"><div class="mlabel">Unrealized P&L</div><div class="mvalue up">+$1,243</div><div class="msub">open positions</div></div>
+  <div class="mcard"><div class="mlabel">Realized P&L</div><div class="mvalue up">+$4,263</div><div class="msub">closed trades</div></div>
+  <div class="mcard"><div class="mlabel">Positions</div><div class="mvalue">3</div><div class="msub">5 trades today</div></div>
+</div>
+
+<!-- Regime bar -->
+<div class="regime-bar">
+  <div class="regime-item">
+    <span class="regime-label">Regime</span>
+    <span class="regime-pill">MID_BULL</span>
+  </div>
+  <div class="regime-item">
+    <span class="regime-label">Entry</span>
+    <span class="regime-val up">✓ Open</span>
+  </div>
+  <div class="regime-item" style="margin-left:auto">
+    <span class="regime-label">Model</span>
+    <span class="regime-val up">LightGBM ON</span>
+  </div>
+  <div class="regime-item">
+    <span class="regime-label">Samples</span>
+    <span class="regime-val">135 features</span>
+  </div>
+</div>
+
+<!-- Signals + Positions -->
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-title">Live signals <span style="color:#475569;font-weight:400;font-size:10px">click for scorecard</span></div>
+
+    <div class="sig-row">
+      <div class="sig-top">
+        <div>
+          <div class="sig-sym">NVDA</div>
+          <div class="sig-price">$875.40 · RSI 61.2</div>
+        </div>
+        <div class="sig-right">
+          <span class="pwin-badge pwin-high">P(win) 73%</span>
+          <span class="badge badge-BUY_MOMENTUM">BUY MOMENTUM</span>
+        </div>
+      </div>
+      <div class="scorecard">
+        <div class="sc-row"><span class="sc-key">Score</span><span class="sc-val">73.0%</span></div>
+        <div class="sc-row"><span class="sc-key">Conviction</span><span class="sc-val">STRONG_BUY</span></div>
+        <div class="sc-row"><span class="sc-key">Bundle</span><span class="sc-val">AI Infrastructure</span></div>
+        <div class="sc-row"><span class="sc-key">Velocity</span><span class="sc-val up">+0.042</span></div>
+        <div class="sc-row"><span class="sc-key">Updated</span><span class="sc-val">09:30</span></div>
+      </div>
+    </div>
+
+    <div class="sig-row">
+      <div class="sig-top">
+        <div>
+          <div class="sig-sym">AMD</div>
+          <div class="sig-price">$162.85 · RSI 54.8</div>
+        </div>
+        <div class="sig-right">
+          <span class="pwin-badge pwin-mid">P(win) 58%</span>
+          <span class="badge badge-BUY">BUY</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sig-row">
+      <div class="sig-top">
+        <div>
+          <div class="sig-sym">MSFT</div>
+          <div class="sig-price">$412.20 · RSI 52.1</div>
+        </div>
+        <div class="sig-right">
+          <span class="pwin-badge pwin-mid">P(win) 55%</span>
+          <span class="badge badge-HOLD_TREND">HOLD TREND</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sig-row">
+      <div class="sig-top">
+        <div>
+          <div class="sig-sym">COIN</div>
+          <div class="sig-price">$221.90 · RSI 68.4</div>
+        </div>
+        <div class="sig-right">
+          <span class="pwin-badge pwin-high">P(win) 67%</span>
+          <span class="badge badge-BUY">BUY</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sig-row">
+      <div class="sig-top">
+        <div>
+          <div class="sig-sym">LLY</div>
+          <div class="sig-price">$810.55 · RSI 43.7</div>
+        </div>
+        <div class="sig-right">
+          <span class="pwin-badge pwin-low">P(win) 46%</span>
+          <span class="badge badge-HOLD">HOLD</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sig-row">
+      <div class="sig-top">
+        <div>
+          <div class="sig-sym">XOM</div>
+          <div class="sig-price">$118.30 · RSI 38.2</div>
+        </div>
+        <div class="sig-right">
+          <span class="pwin-badge pwin-low">P(win) 41%</span>
+          <span class="badge badge-DEGRADE">DEGRADE</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel section-gap">
+      <div class="panel-title">Open positions</div>
+      <div class="pos-row">
+        <div>
+          <div class="pos-sym">NVDA</div>
+          <div class="pos-meta">8 sh · avg $831.20</div>
+        </div>
+        <div>
+          <div class="pos-pnl up">+$353.60</div>
+          <div class="pos-pct">+5.31% · $7,003</div>
+        </div>
+      </div>
+      <div class="pos-row">
+        <div>
+          <div class="pos-sym">AMD</div>
+          <div class="pos-meta">15 sh · avg $148.40</div>
+        </div>
+        <div>
+          <div class="pos-pnl up">+$216.75</div>
+          <div class="pos-pct">+9.73% · $2,442</div>
+        </div>
+      </div>
+      <div class="pos-row">
+        <div>
+          <div class="pos-sym">COIN</div>
+          <div class="pos-meta">10 sh · avg $204.30</div>
+        </div>
+        <div>
+          <div class="pos-pnl up">+$176.00</div>
+          <div class="pos-pct">+8.61% · $2,219</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Recent trades</div>
+      <div class="trade-row">
+        <div>
+          <div class="t-sym">NVDA <span class="t-side-BUY">BUY</span></div>
+          <div class="t-meta">8 sh @ $831.20</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:600;color:#e2e8f0">$6,649</div>
+          <div class="t-meta">2026-06-23 09:31</div>
+        </div>
+      </div>
+      <div class="trade-row">
+        <div>
+          <div class="t-sym">TSLA <span class="t-side-SELL">SELL</span></div>
+          <div class="t-meta">12 sh @ $179.40</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:600;color:#e2e8f0">$2,152</div>
+          <div class="t-meta">2026-06-22 15:47</div>
+        </div>
+      </div>
+      <div class="trade-row">
+        <div>
+          <div class="t-sym">AMD <span class="t-side-BUY">BUY</span></div>
+          <div class="t-meta">15 sh @ $148.40</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:600;color:#e2e8f0">$2,226</div>
+          <div class="t-meta">2026-06-22 09:32</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- News -->
+<div class="news-panel section-gap">
+  <div class="panel-title" style="margin-bottom:10px">
+    News &amp; Intelligence
+    <span style="font-size:10px;color:#475569;font-weight:400">FinBERT scored · 39 sources · live feed</span>
+  </div>
+  <div class="news-filter-bar">
+    <button class="nf-btn active">All</button>
+    <button class="nf-btn">📈 Bullish</button>
+    <button class="nf-btn">📉 Bearish</button>
+    <button class="nf-btn">⚠️ High threat</button>
+    <input style="flex:1;min-width:120px;max-width:200px;background:#0f1117;border:1px solid #1e2433;border-radius:6px;padding:4px 10px;color:#e2e8f0;font-size:11px;outline:none" placeholder="Filter by ticker…">
+  </div>
+  <div>
+    <div class="news-item">
+      <div class="sent-pill sp-bull">+0.8</div>
+      <div>
+        <div class="news-headline">NVIDIA beats Q2 estimates — data center revenue surges 122% YoY to $22.6B</div>
+        <div class="news-meta">
+          <span class="news-source">Reuters</span><span class="news-age">2h ago</span>
+          <span class="threat-chip">HIGH</span>
+          <span class="ticker-chip">NVDA</span><span class="ticker-chip">AMD</span>
+        </div>
+      </div>
+    </div>
+    <div class="news-item">
+      <div class="sent-pill sp-bull">+0.6</div>
+      <div>
+        <div class="news-headline">Fed signals one more rate cut in 2026 — markets rally on dovish tone</div>
+        <div class="news-meta">
+          <span class="news-source">Bloomberg</span><span class="news-age">4h ago</span>
+          <span class="ticker-chip">SPY</span><span class="ticker-chip">QQQ</span><span class="ticker-chip">TLT</span>
+        </div>
+      </div>
+    </div>
+    <div class="news-item">
+      <div class="sent-pill sp-bear">−0.7</div>
+      <div>
+        <div class="news-headline">SEC opens investigation into Coinbase derivatives trading practices</div>
+        <div class="news-meta">
+          <span class="news-source">WSJ</span><span class="news-age">5h ago</span>
+          <span class="threat-chip">HIGH</span>
+          <span class="ticker-chip">COIN</span>
+        </div>
+      </div>
+    </div>
+    <div class="news-item">
+      <div class="sent-pill sp-bull">+0.4</div>
+      <div>
+        <div class="news-headline">Microsoft Azure growth accelerates to 33% — Copilot adoption cited as key driver</div>
+        <div class="news-meta">
+          <span class="news-source">CNBC</span><span class="news-age">6h ago</span>
+          <span class="ticker-chip">MSFT</span><span class="ticker-chip">GOOGL</span>
+        </div>
+      </div>
+    </div>
+    <div class="news-item">
+      <div class="sent-pill sp-neu">~0.1</div>
+      <div>
+        <div class="news-headline">Eli Lilly weight-loss drug Zepbound gains EU approval for heart failure indication</div>
+        <div class="news-meta">
+          <span class="news-source">FT</span><span class="news-age">8h ago</span>
+          <span class="ticker-chip">LLY</span><span class="ticker-chip">NVO</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Watchlist -->
+<div class="wl-panel section-gap">
+  <div class="section-hdr">Watchlist <span style="font-weight:400;font-size:10px">29 symbols</span></div>
+  <div class="wl-chips">
+    <span class="wl-chip has-pos">NVDA</span>
+    <span class="wl-chip has-pos">AMD</span>
+    <span class="wl-chip has-pos">COIN</span>
+    <span class="wl-chip has-signal">MSFT</span>
+    <span class="wl-chip has-signal">GOOGL</span>
+    <span class="wl-chip has-signal">AMZN</span>
+    <span class="wl-chip">LLY</span>
+    <span class="wl-chip">ANET</span>
+    <span class="wl-chip">HOOD</span>
+    <span class="wl-chip">MSTR</span>
+    <span class="wl-chip">JPM</span>
+    <span class="wl-chip">GS</span>
+    <span class="wl-chip">V</span>
+    <span class="wl-chip">XOM</span>
+    <span class="wl-chip">CVX</span>
+    <span class="wl-chip">TSLA</span>
+    <span class="wl-chip">NKE</span>
+    <span class="wl-chip">UNH</span>
+    <span class="wl-chip">ISRG</span>
+    <span class="wl-chip">LMT</span>
+    <span class="wl-chip">RTX</span>
+    <span class="wl-chip">COST</span>
+    <span class="wl-chip">WMT</span>
+    <span class="wl-chip">NEM</span>
+    <span class="wl-chip">FCX</span>
+    <span class="wl-chip">GLD</span>
+  </div>
+  <div class="wl-add" style="margin-top:10px">
+    <input class="wl-input" placeholder="Add symbol e.g. NVDA, TSM">
+    <button class="wl-add-btn">+ Add</button>
+  </div>
+</div>
+
+<!-- Insider · Analyst · Eco -->
+<div class="three-col">
+  <div class="panel">
+    <div class="panel-title">Insider trades</div>
+    <div class="ins-row">
+      <div><div class="ins-sym">NVDA</div><div class="ins-meta">Jensen Huang — CEO</div></div>
+      <div style="text-align:right"><div class="ins-side-Buy">Buy</div><div class="ins-meta">50,000 sh · Jun 18</div></div>
+    </div>
+    <div class="ins-row">
+      <div><div class="ins-sym">AMD</div><div class="ins-meta">Lisa Su — CEO</div></div>
+      <div style="text-align:right"><div class="ins-side-Buy">Buy</div><div class="ins-meta">25,000 sh · Jun 15</div></div>
+    </div>
+    <div class="ins-row">
+      <div><div class="ins-sym">MSFT</div><div class="ins-meta">Satya Nadella — CEO</div></div>
+      <div style="text-align:right"><div class="ins-side-Sell">Sell</div><div class="ins-meta">12,000 sh · Jun 12</div></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Analyst ratings</div>
+    <div class="rat-row">
+      <div><div class="rat-sym">NVDA</div><div class="rat-meta">Goldman Sachs</div></div>
+      <div style="text-align:right"><div class="rat-action-upgrade">Upgrade</div><div class="rat-meta">PT $1,000 · Jun 20</div></div>
+    </div>
+    <div class="rat-row">
+      <div><div class="rat-sym">COIN</div><div class="rat-meta">JPMorgan</div></div>
+      <div style="text-align:right"><div class="rat-action-initiate">Initiate</div><div class="rat-meta">PT $280 · Jun 19</div></div>
+    </div>
+    <div class="rat-row">
+      <div><div class="rat-sym">AMD</div><div class="rat-meta">Barclays</div></div>
+      <div style="text-align:right"><div class="rat-action-upgrade">Upgrade</div><div class="rat-meta">PT $185 · Jun 17</div></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Economic calendar</div>
+    <div class="eco-row">
+      <div><div class="eco-event">Fed FOMC Minutes</div><div style="font-size:10px;color:#64748b">US</div></div>
+      <div style="text-align:right"><div class="eco-impact-high">HIGH</div><div class="eco-time">Jun 25 14:00</div></div>
+    </div>
+    <div class="eco-row">
+      <div><div class="eco-event">PCE Inflation YoY</div><div style="font-size:10px;color:#64748b">US · Prev: 2.6%</div></div>
+      <div style="text-align:right"><div class="eco-impact-high">HIGH</div><div class="eco-time">Jun 27 08:30</div></div>
+    </div>
+    <div class="eco-row">
+      <div><div class="eco-event">Initial Jobless Claims</div><div style="font-size:10px;color:#64748b">US · Prev: 218K</div></div>
+      <div style="text-align:right"><div class="eco-impact-med">MED</div><div class="eco-time">Jun 26 08:30</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Performance -->
+<div class="panel section-gap">
+  <div class="panel-title">Performance analytics</div>
+  <div class="perf-grid">
+    <div class="pc"><div class="pc-label">Win Rate</div><div class="pc-val up">61.3%</div></div>
+    <div class="pc"><div class="pc-label">Profit Factor</div><div class="pc-val up">2.14</div></div>
+    <div class="pc"><div class="pc-label">Total P&L</div><div class="pc-val up">+$4,263</div></div>
+    <div class="pc"><div class="pc-label">Avg Win</div><div class="pc-val up">$312</div></div>
+    <div class="pc"><div class="pc-label">Avg Loss</div><div class="pc-val down">−$146</div></div>
+    <div class="pc"><div class="pc-label">Total Trades</div><div class="pc-val">38</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px">
+    <div>
+      <div class="section-hdr" style="margin-bottom:8px">By setup</div>
+      <table class="perf-table"><thead><tr><th>Setup</th><th>Trades</th><th>Win%</th><th>P&L</th></tr></thead>
+      <tbody>
+        <tr><td>BUY_MOMENTUM</td><td>18</td><td class="up">66%</td><td class="up">+$2,841</td></tr>
+        <tr><td>BUY_FUNDAMENTAL</td><td>12</td><td class="up">58%</td><td class="up">+$1,104</td></tr>
+        <tr><td>BUY_WEAK</td><td>8</td><td>50%</td><td class="up">+$318</td></tr>
+      </tbody></table>
+    </div>
+    <div>
+      <div class="section-hdr" style="margin-bottom:8px">By symbol</div>
+      <table class="perf-table"><thead><tr><th>Symbol</th><th>Trades</th><th>Win%</th><th>P&L</th></tr></thead>
+      <tbody>
+        <tr><td><b>NVDA</b></td><td>8</td><td class="up">75%</td><td class="up">+$1,920</td></tr>
+        <tr><td><b>AMD</b></td><td>6</td><td class="up">67%</td><td class="up">+$834</td></tr>
+        <tr><td><b>MSFT</b></td><td>5</td><td>60%</td><td class="up">+$612</td></tr>
+        <tr><td><b>TSLA</b></td><td>7</td><td class="down">43%</td><td class="down">−$203</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- System health -->
+<div class="panel section-gap">
+  <div class="panel-title">System health</div>
+  <div class="health-grid">
+    <div class="hc"><div class="hc-label">Scheduler</div><div class="hc-val hc-ok">Running</div></div>
+    <div class="hc"><div class="hc-label">Cache</div><div class="hc-val hc-ok">Fresh</div></div>
+    <div class="hc"><div class="hc-label">Kill switch</div><div class="hc-val hc-ok">Inactive</div></div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>
