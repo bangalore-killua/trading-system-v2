@@ -156,6 +156,271 @@ def get_batch_quotes(symbols: List[str]) -> Dict[str, dict]:
         return {sym: {"symbol": sym} for sym in symbols}
 
 
+def get_analysis(symbol: str) -> dict:
+    """Analyst ratings, price targets, and recommendation trend.
+
+    Returns
+    -------
+    {
+      "recommendations": [{"date", "firm", "to_grade", "from_grade", "action"}],
+      "price_target": {"mean", "high", "low", "median", "analyst_count"},
+      "recommendation_mean": float,  # 1=Strong Buy, 5=Sell
+    }
+    """
+    try:
+        import yfinance as yf  # type: ignore
+        t    = yf.Ticker(symbol)
+        info = t.info or {}
+
+        # Analyst price target
+        price_target = {
+            "mean":           info.get("targetMeanPrice"),
+            "high":           info.get("targetHighPrice"),
+            "low":            info.get("targetLowPrice"),
+            "median":         info.get("targetMedianPrice"),
+            "analyst_count":  info.get("numberOfAnalystOpinions"),
+        }
+
+        # Recent upgrades/downgrades
+        recs = []
+        try:
+            rec_df = t.recommendations
+            if rec_df is not None and not rec_df.empty:
+                rec_df = rec_df.tail(20)
+                for ts, row in rec_df.iterrows():
+                    recs.append({
+                        "date":       str(ts)[:10],
+                        "firm":       row.get("Firm", ""),
+                        "to_grade":   row.get("To Grade", ""),
+                        "from_grade": row.get("From Grade", ""),
+                        "action":     row.get("Action", ""),
+                    })
+        except Exception:
+            pass
+
+        return {
+            "symbol":              symbol.upper(),
+            "recommendations":     recs,
+            "price_target":        price_target,
+            "recommendation_mean": info.get("recommendationMean"),
+            "recommendation_key":  info.get("recommendationKey", ""),  # "buy","hold","sell"
+        }
+    except Exception:
+        logger.exception("get_analysis failed for %s", symbol)
+        return {"symbol": symbol.upper(), "recommendations": [], "price_target": {}}
+
+
+def get_earnings_data(symbol: str) -> dict:
+    """Earnings history, upcoming calendar, and quarterly results.
+
+    Returns
+    -------
+    {
+      "quarterly": [{"date", "actual_eps", "estimate_eps", "actual_revenue", "estimate_revenue", "surprise_pct"}],
+      "next_earnings_date": str | None,
+      "trailing_eps": float,
+      "forward_eps": float,
+    }
+    """
+    try:
+        import yfinance as yf  # type: ignore
+        t    = yf.Ticker(symbol)
+        info = t.info or {}
+
+        quarterly = []
+        try:
+            # Earnings history (actual vs estimate)
+            hist = t.earnings_history
+            if hist is not None and not hist.empty:
+                for ts, row in hist.tail(8).iterrows():
+                    actual   = row.get("epsActual")
+                    estimate = row.get("epsEstimate")
+                    surprise = None
+                    if actual is not None and estimate is not None and estimate != 0:
+                        surprise = round((actual - estimate) / abs(estimate) * 100, 1)
+                    quarterly.append({
+                        "date":     str(ts)[:10],
+                        "actual_eps":    actual,
+                        "estimate_eps":  estimate,
+                        "surprise_pct":  surprise,
+                    })
+        except Exception:
+            pass
+
+        # Revenue quarterly (separate from EPS)
+        revenue_rows = []
+        try:
+            fin = t.quarterly_financials
+            if fin is not None and not fin.empty and "Total Revenue" in fin.index:
+                revenue_series = fin.loc["Total Revenue"]
+                for col, val in revenue_series.items():
+                    revenue_rows.append({"date": str(col)[:10], "revenue": val})
+        except Exception:
+            pass
+
+        # Merge EPS and revenue by date
+        rev_by_date = {r["date"]: r["revenue"] for r in revenue_rows}
+        for q in quarterly:
+            q["revenue"] = rev_by_date.get(q["date"])
+
+        return {
+            "symbol":            symbol.upper(),
+            "quarterly":         quarterly,
+            "next_earnings_date": info.get("earningsDate"),
+            "trailing_eps":      info.get("trailingEps"),
+            "forward_eps":       info.get("forwardEps"),
+            "trailing_pe":       info.get("trailingPE"),
+            "forward_pe":        info.get("forwardPE"),
+        }
+    except Exception:
+        logger.exception("get_earnings_data failed for %s", symbol)
+        return {"symbol": symbol.upper(), "quarterly": []}
+
+
+def get_financials_detailed(symbol: str, period: str = "quarterly") -> dict:
+    """Detailed financials: income statement, balance sheet, cash flow.
+
+    Parameters
+    ----------
+    period : "quarterly" | "annual"
+
+    Returns
+    -------
+    {
+      "income_statement": [{date, total_revenue, gross_profit, net_income, ebitda, ...}],
+      "balance_sheet":    [{date, total_assets, total_liabilities, total_equity, cash, debt}],
+      "cash_flow":        [{date, operating_cashflow, capex, free_cashflow, ...}],
+    }
+    """
+    try:
+        import yfinance as yf  # type: ignore
+        t = yf.Ticker(symbol)
+
+        def df_to_rows(df) -> list:
+            if df is None or df.empty:
+                return []
+            rows = []
+            for col in df.columns:
+                row = {"date": str(col)[:10]}
+                for idx in df.index:
+                    val = df.loc[idx, col]
+                    row[str(idx).lower().replace(" ", "_")] = (
+                        float(val) if pd.notna(val) else None
+                    )
+                rows.append(row)
+            return rows
+
+        if period == "annual":
+            income_df  = t.financials
+            balance_df = t.balance_sheet
+            cashflow_df = t.cashflow
+        else:
+            income_df  = t.quarterly_financials
+            balance_df = t.quarterly_balance_sheet
+            cashflow_df = t.quarterly_cashflow
+
+        income_rows  = df_to_rows(income_df)
+        balance_rows = df_to_rows(balance_df)
+        cf_rows      = df_to_rows(cashflow_df)
+
+        # Compute FCF = operating_cash_flow - capex
+        for row in cf_rows:
+            ocf   = row.get("operating_cash_flow") or row.get("total_cash_from_operating_activities")
+            capex = row.get("capital_expenditure") or row.get("capital_expenditures")
+            if ocf is not None and capex is not None:
+                row["free_cash_flow"] = ocf + capex  # capex is usually negative
+
+        return {
+            "symbol":           symbol.upper(),
+            "period":           period,
+            "income_statement": income_rows[:8],
+            "balance_sheet":    balance_rows[:8],
+            "cash_flow":        cf_rows[:8],
+        }
+    except Exception:
+        logger.exception("get_financials_detailed failed for %s", symbol)
+        return {
+            "symbol": symbol.upper(), "period": period,
+            "income_statement": [], "balance_sheet": [], "cash_flow": [],
+        }
+
+
+def get_holdings_data(symbol: str) -> dict:
+    """Institutional holders, mutual funds, insiders, and options activity.
+
+    Returns
+    -------
+    {
+      "institutional": [{holder, shares, value, pct_held, date_reported}],
+      "mutual_funds":  [{holder, shares, value, pct_held, date_reported}],
+      "insiders":      [{name, title, transaction, shares, value, date}],
+    }
+    """
+    try:
+        import yfinance as yf  # type: ignore
+        t = yf.Ticker(symbol)
+
+        def parse_holders(df) -> list:
+            if df is None or df.empty:
+                return []
+            rows = []
+            for _, row in df.head(10).iterrows():
+                rows.append({
+                    "holder":         str(row.get("Holder",        row.get("Name", ""))),
+                    "shares":         _safe_int(row.get("Shares")),
+                    "value":          _safe_float(row.get("Value")),
+                    "pct_held":       _safe_float(row.get("% Out", row.get("Pct Held"))),
+                    "date_reported":  str(row.get("Date Reported", ""))[:10],
+                })
+            return rows
+
+        def parse_insiders(df) -> list:
+            if df is None or df.empty:
+                return []
+            rows = []
+            for _, row in df.head(20).iterrows():
+                rows.append({
+                    "name":        str(row.get("Name",         "")),
+                    "title":       str(row.get("Title",        "")),
+                    "transaction": str(row.get("Transaction",  "")),
+                    "shares":      _safe_int(row.get("Shares")),
+                    "value":       _safe_float(row.get("Value")),
+                    "date":        str(row.get("Start Date",   ""))[:10],
+                })
+            return rows
+
+        institutional = parse_holders(t.institutional_holders)
+        mutual_funds  = parse_holders(t.mutualfund_holders)
+        insiders      = parse_insiders(t.insider_transactions)
+
+        return {
+            "symbol":       symbol.upper(),
+            "institutional": institutional,
+            "mutual_funds":  mutual_funds,
+            "insiders":      insiders,
+        }
+    except Exception:
+        logger.exception("get_holdings_data failed for %s", symbol)
+        return {
+            "symbol": symbol.upper(),
+            "institutional": [], "mutual_funds": [], "insiders": [],
+        }
+
+
+def _safe_int(val) -> Optional[int]:
+    try:
+        return int(val) if val is not None and str(val) != "nan" else None
+    except Exception:
+        return None
+
+
+def _safe_float(val) -> Optional[float]:
+    try:
+        return round(float(val), 4) if val is not None and str(val) != "nan" else None
+    except Exception:
+        return None
+
+
 if __name__ == "__main__":
     q = get_quote("AAPL")
     print("Quote:", q)
