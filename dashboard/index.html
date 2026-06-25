@@ -24,6 +24,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ks-inactive{background:#1e2433;color:#94a3b8;border:1px solid #374151}
 .ks-inactive:hover{background:#450a0a;color:#fca5a5;border-color:#ef4444}
 
+/* ── Macro strip ── */
+.macro-strip{display:flex;gap:0;overflow-x:auto;scrollbar-width:none;background:#0d1117;border-bottom:1px solid #1e2433}
+.macro-strip::-webkit-scrollbar{display:none}
+.mac-pill{flex:0 0 auto;padding:7px 18px;border-right:1px solid #1e2433;display:flex;flex-direction:column;gap:2px}
+.mac-pill .mp-label{font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:.5px}
+.mac-pill .mp-val{font-size:13px;font-weight:700;font-family:'SF Mono',Menlo,monospace}
+.mac-pill .mp-chg{font-size:9px}
+.mp-up{color:#22c55e}.mp-down{color:#ef4444}.mp-neutral{color:#94a3b8}
+.cb-clear{color:#22c55e}.cb-warn{color:#f59e0b}.cb-fire{color:#ef4444}
+
 /* ── Layout ── */
 .main{padding:18px 24px}
 .section-gap{margin-bottom:14px}
@@ -34,9 +44,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .mcard .mlabel{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
 .mcard .mvalue{font-size:20px;font-weight:700;color:#fff}
 .mcard .msub{font-size:10px;color:#475569;margin-top:3px}
-.up{color:#22c55e!important}
-.down{color:#ef4444!important}
-.neutral{color:#94a3b8!important}
+.up{color:#22c55e!important}.down{color:#ef4444!important}.neutral{color:#94a3b8!important}
 
 /* ── Regime bar ── */
 .regime-bar{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:12px 18px;margin-bottom:14px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
@@ -87,13 +95,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .sc-key{color:#94a3b8}
 .sc-val{font-weight:600;color:#e2e8f0}
 
-/* ── Position rows ── */
-.pos-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #1e2433}
+/* ── Position rows (v13 enriched) ── */
+.pos-row{display:flex;justify-content:space-between;align-items:flex-start;padding:9px 0;border-bottom:1px solid #1e2433}
 .pos-row:last-child{border-bottom:none}
 .pos-sym{font-weight:700;font-size:13px;color:#fff}
-.pos-meta{font-size:10px;color:#64748b;margin-top:2px}
+.pos-meta{font-size:10px;color:#64748b;margin-top:2px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .pos-pnl{font-weight:700;font-size:13px;text-align:right}
 .pos-pct{font-size:10px;color:#64748b;text-align:right;margin-top:2px}
+/* tranche tier badges */
+.tier-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px}
+.tier-T1{background:rgba(99,102,241,0.15);color:#a5b4fc}
+.tier-T2{background:rgba(99,102,241,0.25);color:#818cf8}
+.tier-T3{background:rgba(99,102,241,0.4);color:#6366f1}
+.tier-DIP{background:rgba(251,191,36,0.15);color:#fbbf24}
 
 /* ── Trade rows ── */
 .trade-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #1e2433;font-size:12px}
@@ -108,6 +122,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .news-filter-bar{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
 .nf-btn{padding:4px 12px;border-radius:20px;border:1px solid #1e2433;background:transparent;color:#94a3b8;font-size:11px;cursor:pointer;transition:all .15s}
 .nf-btn.active{background:#1e3a5f;border-color:#3b82f6;color:#93c5fd}
+.nf-btn.ai-btn{border-color:#6366f1;color:#a5b4fc}
+.nf-btn.ai-btn:hover{background:#1e1e3a;color:#818cf8}
 .nf-search{flex:1;min-width:120px;max-width:200px;background:#0f1117;border:1px solid #1e2433;border-radius:6px;padding:4px 10px;color:#e2e8f0;font-size:11px;outline:none}
 .nf-search::placeholder{color:#475569}
 .news-grid{display:flex;flex-direction:column;gap:0}
@@ -132,6 +148,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .tc-HIGH{background:#431407;color:#fb923c}
 .tc-MEDIUM{background:#292524;color:#f59e0b}
 .tc-LOW,.tc-NONE,.tc-UNKNOWN{display:none}
+/* v13: credibility pill */
+.cred-pill{font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px}
+.cred-high{background:rgba(34,197,94,0.12);color:#4ade80}
+.cred-mid{background:rgba(100,116,139,0.15);color:#64748b}
+/* AI analysis box */
+.ai-analysis-box{background:#0d0d1a;border:1px solid #2d2d5a;border-radius:8px;padding:12px;font-size:11px;color:#a5b4fc;line-height:1.6;display:none;margin-top:10px;white-space:pre-wrap}
 
 /* ── Watchlist ── */
 .wl-panel{background:#131722;border:1px solid #1e2433;border-radius:10px;padding:16px;margin-bottom:14px}
@@ -156,14 +178,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .perf-table td{padding:6px 8px;border-bottom:1px solid #1e243322;color:#e2e8f0}
 .perf-table tr:last-child td{border-bottom:none}
 
-/* ── Health panel ── */
-.health-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+/* ── Health panel (v13: expanded) ── */
+.health-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px}
+.cb-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .hc{background:#0f1117;border:1px solid #1e2433;border-radius:8px;padding:12px}
 .hc-label{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
 .hc-val{font-size:12px;font-weight:600;color:#e2e8f0}
 .hc-ok{color:#22c55e}
 .hc-warn{color:#f59e0b}
 .hc-err{color:#ef4444}
+.hc-sub{font-size:10px;color:#475569;margin-top:3px}
 
 /* ── Misc ── */
 .empty{font-size:12px;color:#475569;padding:8px 0}
@@ -208,9 +232,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div class="topbar-right">
     <a href="/terminal" style="font-size:12px;color:#6366f1;text-decoration:none;font-weight:600;margin-right:6px">Terminal →</a>
     <span id="regime-topbar" style="font-size:12px;color:#64748b"></span>
-    <span id="model-status" class="model-badge" style="display:none">LGB ON</span>
+    <span id="model-status" class="model-badge" style="display:none">AutoGluon ON</span>
     <button class="ks-btn ks-inactive" id="ks-btn" onclick="toggleKillSwitch()">⚡ KILL SWITCH</button>
   </div>
+</div>
+
+<!-- ── Macro strip (v13) ────────────────────────────────────── -->
+<div class="macro-strip" id="macro-strip">
+  <div class="mac-pill"><div class="mp-label">SPY</div><div class="mp-val mp-neutral" id="ms-spy">—</div><div class="mp-chg mp-neutral" id="ms-spy-chg">—</div></div>
+  <div class="mac-pill"><div class="mp-label">QQQ</div><div class="mp-val mp-neutral" id="ms-qqq">—</div><div class="mp-chg mp-neutral" id="ms-qqq-chg">—</div></div>
+  <div class="mac-pill"><div class="mp-label">DIA</div><div class="mp-val mp-neutral" id="ms-dia">—</div><div class="mp-chg mp-neutral" id="ms-dia-chg">—</div></div>
+  <div class="mac-pill"><div class="mp-label">GLD</div><div class="mp-val mp-neutral" id="ms-gld">—</div><div class="mp-chg mp-neutral" id="ms-gld-chg">—</div></div>
+  <div class="mac-pill"><div class="mp-label">VIX</div><div class="mp-val mp-neutral" id="ms-vix">—</div><div class="mp-chg" id="ms-vix-cb" style="font-size:9px;color:#475569">—</div></div>
+  <div class="mac-pill"><div class="mp-label">10Y Yield</div><div class="mp-val mp-neutral" id="ms-tnx">—</div><div class="mp-chg mp-neutral" id="ms-tnx-chg">—</div></div>
 </div>
 
 <div class="main">
@@ -224,7 +258,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 <!-- ── Metric cards ─────────────────────────────────────── -->
 <div class="metrics" id="metrics-row">
-  <div class="mcard"><div class="mlabel">Cash</div><div class="mvalue" id="m-cash">—</div><div class="msub">deployable</div></div>
+  <div class="mcard"><div class="mlabel">Cash</div><div class="mvalue" id="m-cash">—</div><div class="msub" id="m-cash-pct">deployable</div></div>
   <div class="mcard"><div class="mlabel">Portfolio</div><div class="mvalue" id="m-total">—</div><div class="msub" id="m-total-pnl"></div></div>
   <div class="mcard"><div class="mlabel">Unrealized P&L</div><div class="mvalue" id="m-unreal">—</div><div class="msub">open positions</div></div>
   <div class="mcard"><div class="mlabel">Realized P&L</div><div class="mvalue" id="m-real">—</div><div class="msub">closed trades</div></div>
@@ -241,13 +275,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <span class="regime-label">Entry</span>
     <span class="regime-val" id="rb-entry">—</span>
   </div>
-  <div class="regime-item" style="margin-left:auto">
+  <div class="regime-item">
     <span class="regime-label">Model</span>
     <span class="regime-val" id="rb-model">—</span>
   </div>
   <div class="regime-item">
-    <span class="regime-label">Samples</span>
+    <span class="regime-label">Features</span>
     <span class="regime-val" id="rb-samples">—</span>
+  </div>
+  <div class="regime-item" style="margin-left:auto">
+    <span class="regime-label">VIX Gate</span>
+    <span class="regime-val" id="rb-vix-gate">—</span>
+  </div>
+  <div class="regime-item">
+    <span class="regime-label">Cash Gate</span>
+    <span class="regime-val" id="rb-cash-gate">—</span>
   </div>
 </div>
 
@@ -261,7 +303,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   </div>
   <div>
     <div class="panel section-gap">
-      <div class="panel-title">Open positions</div>
+      <div class="panel-title">
+        Open positions
+        <span style="font-size:10px;color:#475569;font-weight:400">tier · days · composite</span>
+      </div>
       <div id="positions-list"><div class="loading">Loading...</div></div>
     </div>
     <div class="panel">
@@ -275,15 +320,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <div class="news-panel section-gap">
   <div class="panel-title" style="margin-bottom:10px">
     News &amp; Intelligence
-    <span style="font-size:10px;color:#475569;font-weight:400">FinBERT scored · 39 sources · live feed</span>
+    <span style="font-size:10px;color:#475569;font-weight:400">PRNewswire · BusinessWire · 39 feeds · FinBERT scored</span>
   </div>
   <div class="news-filter-bar">
     <button class="nf-btn active" onclick="setNewsFilter('all',this)">All</button>
     <button class="nf-btn" onclick="setNewsFilter('bull',this)">📈 Bullish</button>
     <button class="nf-btn" onclick="setNewsFilter('bear',this)">📉 Bearish</button>
     <button class="nf-btn" onclick="setNewsFilter('threat',this)">⚠️ High threat</button>
+    <button class="nf-btn" onclick="setNewsFilter('primary',this)">⭐ Primary sources</button>
     <input class="nf-search" id="news-ticker-input" placeholder="Filter by ticker…" oninput="applyNewsFilter()">
+    <button class="nf-btn ai-btn" onclick="runNewsAnalysis()" id="ai-news-btn">✦ AI Analysis</button>
   </div>
+  <div id="ai-analysis-box" class="ai-analysis-box"></div>
   <div id="news-list"><div class="loading">Loading news...</div></div>
 </div>
 
@@ -342,13 +390,31 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   </div>
 </div>
 
-<!-- ── System health ────────────────────────────────────── -->
+<!-- ── System health + Circuit breakers (v13) ──────────── -->
 <div class="panel section-gap">
   <div class="panel-title">System health</div>
-  <div class="health-grid">
+  <div class="health-grid" style="margin-bottom:10px">
     <div class="hc"><div class="hc-label">Scheduler</div><div class="hc-val" id="h-scheduler">—</div></div>
     <div class="hc"><div class="hc-label">Cache</div><div class="hc-val" id="h-cache">—</div></div>
     <div class="hc"><div class="hc-label">Kill switch</div><div class="hc-val" id="h-ks">—</div></div>
+  </div>
+  <div class="section-hdr" style="margin-bottom:8px;font-size:10px">Circuit Breakers (v13)</div>
+  <div class="cb-grid">
+    <div class="hc">
+      <div class="hc-label">VIX</div>
+      <div class="hc-val" id="cb-vix">—</div>
+      <div class="hc-sub" id="cb-vix-sub">—</div>
+    </div>
+    <div class="hc">
+      <div class="hc-label">Cash Reserve</div>
+      <div class="hc-val" id="cb-cash">—</div>
+      <div class="hc-sub" id="cb-cash-sub">min 10% required</div>
+    </div>
+    <div class="hc">
+      <div class="hc-label">Portfolio Drawdown</div>
+      <div class="hc-val" id="cb-drawdown">—</div>
+      <div class="hc-sub" id="cb-drawdown-sub">pause at −12%</div>
+    </div>
   </div>
 </div>
 
@@ -356,20 +422,23 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 <script>
 // ── State ───────────────────────────────────────────────────────
-let _news = [];
+let _news       = [];
 let _newsFilter = 'all';
-let _signals = [];
-let _positions = [];
-let _wlVisible = true;
-let _ksActive = false;
-let _refreshTimer = 60;
+let _signals    = [];
+let _positions  = [];
+let _ledger     = [];   // v13: open ledger records with tier/composite
+let _wlVisible  = true;
+let _ksActive   = false;
+let _vixValue   = null;
+let _cashPct    = null;
+let _refreshTimer   = 60;
 let _refreshInterval;
 
 // ── Utils ───────────────────────────────────────────────────────
-const fmt$ = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-const fmtPct = v => v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2) + '%';
+const fmt$    = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+const fmtPct  = v => v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2) + '%';
 const pnlClass = v => v > 0 ? 'up' : v < 0 ? 'down' : 'neutral';
-const el = id => document.getElementById(id);
+const el       = id => document.getElementById(id);
 
 async function apiFetch(url) {
   try {
@@ -389,6 +458,13 @@ async function loadPortfolio() {
   el('m-total').textContent = fmt$(p.total_value);
   el('m-total-pnl').innerHTML = `<span class="${pnlClass(p.total_pnl)}">${fmtPct(p.total_pnl_pct)}</span> all time`;
 
+  // v13: cash % circuit breaker
+  if (p.total_value > 0) {
+    _cashPct = (p.cash / p.total_value) * 100;
+    el('m-cash-pct').textContent = `${_cashPct.toFixed(1)}% of portfolio`;
+    updateCashGate(_cashPct);
+  }
+
   const unreal = p.positions?.reduce((s,x) => s + (x.pnl||0), 0) || 0;
   el('m-unreal').className = 'mvalue ' + pnlClass(unreal);
   el('m-unreal').textContent = fmt$(unreal);
@@ -400,22 +476,106 @@ async function loadPortfolio() {
   _positions = p.positions || [];
   renderPositions(_positions);
   renderTrades(p.trades || []);
+
+  // v13: drawdown circuit breaker
+  if (p.total_pnl_pct != null) {
+    const dd = p.total_pnl_pct;
+    const ddEl = el('cb-drawdown');
+    const ddSub = el('cb-drawdown-sub');
+    ddEl.textContent = fmtPct(dd);
+    if (dd <= -12) {
+      ddEl.className = 'hc-val hc-err';
+      ddSub.textContent = '🛑 ENTRIES PAUSED';
+    } else if (dd <= -8) {
+      ddEl.className = 'hc-val hc-warn';
+      ddSub.textContent = 'Approaching limit';
+    } else {
+      ddEl.className = 'hc-val hc-ok';
+      ddSub.textContent = 'pause at −12%';
+    }
+  }
+}
+
+function updateCashGate(pct) {
+  const cashEl  = el('cb-cash');
+  const cashSub = el('cb-cash-sub');
+  const gateEl  = el('rb-cash-gate');
+  cashEl.textContent = pct.toFixed(1) + '%';
+  if (pct < 10) {
+    cashEl.className = 'hc-val hc-err';
+    cashSub.textContent = '🛑 NO NEW BUYS';
+    if (gateEl) { gateEl.textContent = '✗ Blocked (<10%)'; gateEl.className = 'regime-val down'; }
+  } else if (pct < 20) {
+    cashEl.className = 'hc-val hc-warn';
+    cashSub.textContent = 'Low — caution';
+    if (gateEl) { gateEl.textContent = '△ Low'; gateEl.className = 'regime-val'; gateEl.style.color='#f59e0b'; }
+  } else {
+    cashEl.className = 'hc-val hc-ok';
+    cashSub.textContent = 'min 10% required';
+    if (gateEl) { gateEl.textContent = '✓ OK'; gateEl.className = 'regime-val up'; }
+  }
+}
+
+// ── v13: Ledger (open trades with tier info) ──────────────────────
+async function loadLedger() {
+  const d = await apiFetch('/api/ledger/open');
+  if (!d || d.status !== 'ok') return;
+  _ledger = d.data || [];
+  // re-render positions now that we have ledger data
+  if (_positions.length) renderPositions(_positions);
 }
 
 function renderPositions(pos) {
   const c = el('positions-list');
   if (!pos.length) { c.innerHTML = '<div class="empty">No open positions</div>'; return; }
-  c.innerHTML = pos.map(p => `
+
+  // build ledger lookup by symbol for enrichment
+  const ledgerMap = {};
+  for (const r of _ledger) {
+    if (!ledgerMap[r.symbol]) ledgerMap[r.symbol] = [];
+    ledgerMap[r.symbol].push(r);
+  }
+
+  c.innerHTML = pos.map(p => {
+    const ledRows = ledgerMap[p.symbol] || [];
+    // collect unique tiers for this symbol
+    const tiers = [...new Set(ledRows.map(r => r.tier).filter(Boolean))];
+    const tierBadges = tiers.map(t =>
+      `<span class="tier-badge tier-${t}">${t}</span>`
+    ).join('');
+
+    // entry composite score (basket_score from most recent ledger row)
+    const compositeScore = ledRows.length
+      ? ledRows[0].basket_score != null
+        ? `<span style="color:#6366f1;font-size:9px">◎ ${(ledRows[0].basket_score*100).toFixed(0)}%</span>`
+        : ''
+      : '';
+
+    // days held from most recent entry_date
+    let daysHeld = '';
+    if (ledRows.length && ledRows[0].entry_date) {
+      const entryMs = new Date(ledRows[0].entry_date).getTime();
+      const days = Math.floor((Date.now() - entryMs) / 86400000);
+      daysHeld = `<span style="color:#475569;font-size:9px">${days}d</span>`;
+    }
+
+    return `
     <div class="pos-row">
       <div>
         <div class="pos-sym">${p.symbol}</div>
-        <div class="pos-meta">${p.shares} sh · avg ${fmt$(p.avg_price)}</div>
+        <div class="pos-meta">
+          ${p.shares} sh · avg ${fmt$(p.avg_price)}
+          ${tierBadges}
+          ${daysHeld}
+          ${compositeScore}
+        </div>
       </div>
       <div>
         <div class="pos-pnl ${pnlClass(p.pnl)}">${fmt$(p.pnl)}</div>
         <div class="pos-pct">${fmtPct(p.pnl_pct)} · ${fmt$(p.value)}</div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function renderTrades(trades) {
@@ -452,7 +612,7 @@ async function loadSignals() {
   if (!sorted.length) { c.innerHTML = '<div class="empty">No signals</div>'; return; }
   c.innerHTML = sorted.map((s,i) => {
     const label = s.signal_label || 'HOLD';
-    const pwin = s.p_win;
+    const pwin  = s.p_win;
     const pwinHtml = pwin != null
       ? `<span class="pwin-badge ${pwin>=.65?'pwin-high':pwin>=.52?'pwin-mid':'pwin-low'}">P(win) ${(pwin*100).toFixed(0)}%</span>`
       : '';
@@ -481,12 +641,12 @@ async function loadSignals() {
 
 function buildScorecard(s) {
   const rows = [
-    ['Score', s.normalised_score != null ? (s.normalised_score*100).toFixed(1)+'%' : '—'],
-    ['Conviction', s.conviction || '—'],
-    ['Bundle', s.bundle_name || '—'],
+    ['Score',       s.normalised_score != null ? (s.normalised_score*100).toFixed(1)+'%' : '—'],
+    ['Conviction',  s.conviction || '—'],
+    ['Bundle',      s.bundle_name || '—'],
     ['Signal type', s.signal_type || '—'],
-    ['Velocity', s.score_velocity != null ? (s.score_velocity>0?'+':'')+s.score_velocity.toFixed(3) : '—'],
-    ['Updated', s.timestamp ? s.timestamp.slice(11,16) : '—'],
+    ['Velocity',    s.score_velocity != null ? (s.score_velocity>0?'+':'')+s.score_velocity.toFixed(3) : '—'],
+    ['Updated',     s.timestamp ? s.timestamp.slice(11,16) : '—'],
   ];
   return rows.map(([k,v]) => `<div class="sc-row"><span class="sc-key">${k}</span><span class="sc-val">${v}</span></div>`).join('');
 }
@@ -504,19 +664,87 @@ async function loadRegime() {
   const pill = el('rb-regime');
   pill.textContent = r.regime;
   pill.className = `regime-pill rp-${r.regime}`;
-  el('rb-entry').textContent = r.allowed_entry ? '✓ Open' : '✗ Blocked';
-  el('rb-entry').className = 'regime-val ' + (r.allowed_entry ? 'up' : 'down');
+  el('rb-entry').textContent  = r.allowed_entry ? '✓ Open' : '✗ Blocked';
+  el('rb-entry').className    = 'regime-val ' + (r.allowed_entry ? 'up' : 'down');
   el('regime-topbar').textContent = r.regime;
 
-  // model info from health
   const h = await apiFetch('/api/health/scheduler');
   if (h?.data) {
-    el('rb-model').textContent = h.data.meta_model_enabled ? 'LightGBM ON' : 'OFF';
-    el('rb-model').className = 'regime-val ' + (h.data.meta_model_enabled ? 'up' : 'neutral');
+    // v13: renamed from "LightGBM ON" to "AutoGluon ON"
+    el('rb-model').textContent  = h.data.meta_model_enabled ? 'AutoGluon ON' : 'OFF';
+    el('rb-model').className    = 'regime-val ' + (h.data.meta_model_enabled ? 'up' : 'neutral');
+    const feats = h.data.n_features ? `${h.data.n_features} features` : '—';
+    el('rb-samples').textContent = feats;
   }
 }
 
-// ── News (fincept layer) ─────────────────────────────────────────
+// ── v13: Macro strip (indices + VIX circuit breaker) ─────────────
+async function loadMacro() {
+  const d = await apiFetch('/api/global/indices');
+  if (!d || d.status !== 'ok') return;
+  const q = d.data || {};
+
+  function setMac(sym, valId, chgId, prefix='') {
+    const info = q[sym];
+    if (!info) return;
+    const price = info.price;
+    const pct   = info.change_pct;
+    const valEl = el(valId);
+    const chgEl = el(chgId);
+    if (valEl && price != null) {
+      valEl.textContent = (prefix || '$') + price.toFixed(2);
+      valEl.className   = 'mp-val ' + (pct > 0 ? 'mp-up' : pct < 0 ? 'mp-down' : 'mp-neutral');
+    }
+    if (chgEl && pct != null) {
+      chgEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+      chgEl.className   = 'mp-chg ' + (pct > 0 ? 'mp-up' : pct < 0 ? 'mp-down' : 'mp-neutral');
+    }
+  }
+
+  setMac('SPY',  'ms-spy',  'ms-spy-chg');
+  setMac('QQQ',  'ms-qqq',  'ms-qqq-chg');
+  setMac('DIA',  'ms-dia',  'ms-dia-chg');
+  setMac('GLD',  'ms-gld',  'ms-gld-chg');
+  setMac('^TNX', 'ms-tnx',  'ms-tnx-chg', '');
+
+  // VIX — special handling for circuit breaker
+  const vixInfo = q['^VIX'];
+  if (vixInfo && vixInfo.price != null) {
+    _vixValue = vixInfo.price;
+    const vixEl  = el('ms-vix');
+    const cbEl   = el('cb-vix');
+    const cbSub  = el('cb-vix-sub');
+    const gateEl = el('rb-vix-gate');
+
+    vixEl.textContent = _vixValue.toFixed(2);
+    vixEl.className   = 'mp-val ' + (_vixValue > 40 ? 'mp-down' : _vixValue > 25 ? 'mp-neutral' : 'mp-up');
+
+    if (_vixValue > 40) {
+      el('ms-vix-cb').textContent = '🛑 sizes ×0.5';
+      el('ms-vix-cb').style.color = '#ef4444';
+      cbEl.textContent  = _vixValue.toFixed(1);
+      cbEl.className    = 'hc-val hc-err';
+      cbSub.textContent = '🛑 ALL SIZES × 0.5';
+      if (gateEl) { gateEl.textContent = '🛑 > 40'; gateEl.className = 'regime-val down'; }
+    } else if (_vixValue > 25) {
+      el('ms-vix-cb').textContent = '△ elevated';
+      el('ms-vix-cb').style.color = '#f59e0b';
+      cbEl.textContent  = _vixValue.toFixed(1);
+      cbEl.className    = 'hc-val hc-warn';
+      cbSub.textContent = 'Elevated — be cautious';
+      if (gateEl) { gateEl.textContent = '△ Elevated'; gateEl.className = 'regime-val'; gateEl.style.color='#f59e0b'; }
+    } else {
+      el('ms-vix-cb').textContent = '✓ clear';
+      el('ms-vix-cb').style.color = '#22c55e';
+      cbEl.textContent  = _vixValue.toFixed(1);
+      cbEl.className    = 'hc-val hc-ok';
+      cbSub.textContent = 'Normal — no size cut';
+      if (gateEl) { gateEl.textContent = '✓ Clear'; gateEl.className = 'regime-val up'; }
+    }
+  }
+}
+
+// ── News ─────────────────────────────────────────────────────────
 async function loadNews() {
   const d = await apiFetch('/api/news?hours=48&limit=80');
   if (!d || d.status !== 'ok') return;
@@ -538,9 +766,10 @@ function renderNews() {
   const ticker = el('news-ticker-input').value.trim().toUpperCase();
   let items = [..._news];
 
-  if (_newsFilter === 'bull') items = items.filter(a => a.sentiment > 0.45);
-  else if (_newsFilter === 'bear') items = items.filter(a => a.sentiment < -0.45);
-  else if (_newsFilter === 'threat') items = items.filter(a => ['CRITICAL','HIGH'].includes(a.threat));
+  if (_newsFilter === 'bull')    items = items.filter(a => a.sentiment > 0.45);
+  else if (_newsFilter === 'bear')    items = items.filter(a => a.sentiment < -0.45);
+  else if (_newsFilter === 'threat')  items = items.filter(a => ['CRITICAL','HIGH'].includes(a.threat));
+  else if (_newsFilter === 'primary') items = items.filter(a => (a.credibility || 0) >= 1.0);
 
   if (ticker) items = items.filter(a => a.tickers?.some(t => t.includes(ticker)) || a.title?.toUpperCase().includes(ticker));
 
@@ -548,12 +777,19 @@ function renderNews() {
   if (!items.length) { c.innerHTML = '<div class="empty">No articles match the filter</div>'; return; }
 
   c.innerHTML = items.slice(0,40).map(a => {
-    const s = a.sentiment;
-    const sc = s > 0.2 ? 'sp-bull' : s < -0.2 ? 'sp-bear' : 'sp-neu';
+    const s      = a.sentiment || 0;
+    const sc     = s > 0.2 ? 'sp-bull' : s < -0.2 ? 'sp-bear' : 'sp-neu';
     const slabel = s > 0.2 ? '+' : s < -0.2 ? '−' : '~';
     const tickers = (a.tickers||[]).map(t => `<span class="ticker-chip" onclick="filterByTicker('${t}')">${t}</span>`).join('');
-    const threat = a.threat && !['LOW','NONE','UNKNOWN'].includes(a.threat)
+    const threat  = a.threat && !['LOW','NONE','UNKNOWN',false].includes(a.threat)
       ? `<span class="threat-chip tc-${a.threat}">${a.threat}</span>` : '';
+
+    // v13: credibility badge
+    const cred = a.credibility;
+    const credHtml = cred != null
+      ? `<span class="cred-pill ${cred >= 1.0 ? 'cred-high' : 'cred-mid'}">${cred.toFixed(1)}</span>`
+      : '';
+
     return `
     <div class="news-item">
       <div class="sent-pill ${sc}">${slabel}${Math.abs(s).toFixed(1)}</div>
@@ -561,6 +797,7 @@ function renderNews() {
         <div class="news-headline"><a href="${a.url||'#'}" target="_blank" rel="noopener">${a.title}</a></div>
         <div class="news-meta">
           <span class="news-source">${a.source}</span>
+          ${credHtml}
           <span class="news-age">${a.age_label}</span>
           ${threat}
           <div class="news-tickers">${tickers}</div>
@@ -578,11 +815,34 @@ function filterByTicker(t) {
   renderNews();
 }
 
+// ── v13: AI News Analysis ────────────────────────────────────────
+async function runNewsAnalysis() {
+  const box = el('ai-analysis-box');
+  const btn = el('ai-news-btn');
+  box.style.display = 'block';
+  box.textContent   = '✦ Analysing portfolio impact…';
+  btn.textContent   = '✦ Analysing…';
+  btn.disabled      = true;
+
+  const posSyms = _positions.map(p => p.symbol).join(',');
+  const d = await apiFetch(`/api/news/analysis?tickers=${posSyms}&hours=24&limit=30`);
+
+  btn.textContent = '✦ AI Analysis';
+  btn.disabled    = false;
+
+  if (!d || d.status !== 'ok') {
+    box.textContent = 'Analysis unavailable — check Groq API key.';
+    return;
+  }
+  const r = d.data;
+  box.textContent = r.summary || JSON.stringify(r, null, 2);
+}
+
 // ── Watchlist ────────────────────────────────────────────────────
 async function loadWatchlist() {
   const d = await apiFetch('/api/watchlist');
   if (!d || d.status !== 'ok') return;
-  const syms = d.data || [];
+  const syms    = d.data || [];
   el('wl-count').textContent = `${syms.length} symbols`;
   const posSyms = new Set((_positions||[]).map(p => p.symbol));
   const sigSyms = new Set((_signals||[]).filter(s => s.signal_label?.startsWith('BUY')).map(s => s.symbol));
@@ -678,16 +938,17 @@ async function loadPerformance() {
   };
   set('p-winrate', p.win_rate != null ? (p.win_rate*100).toFixed(1)+'%' : '—',
     p.win_rate > .55 ? 'up' : p.win_rate < .4 ? 'down' : '');
-  set('p-pf', p.profit_factor?.toFixed(2) ?? '—', p.profit_factor > 1.5 ? 'up' : p.profit_factor < 1 ? 'down' : '');
+  set('p-pf',  p.profit_factor?.toFixed(2) ?? '—', p.profit_factor > 1.5 ? 'up' : p.profit_factor < 1 ? 'down' : '');
   set('p-pnl', p.total_pnl != null ? fmt$(p.total_pnl) : '—', pnlClass(p.total_pnl));
-  set('p-avgwin', p.avg_win != null ? fmt$(p.avg_win) : '—');
-  set('p-avgloss', p.avg_loss != null ? fmt$(p.avg_loss) : '—');
-  set('p-trades', p.total_trades ?? '—');
+  set('p-avgwin',  p.avg_win   != null ? fmt$(p.avg_win)  : '—');
+  set('p-avgloss', p.avg_loss  != null ? fmt$(p.avg_loss) : '—');
+  set('p-trades',  p.total_trades ?? '—');
 
   const bys = await apiFetch('/api/performance/by_setup');
-  if (bys?.data?.length) {
+  if (bys?.data?.length || bys?.by_setup_type?.length) {
+    const rows = bys.data || bys.by_setup_type || [];
     el('perf-setup-list').innerHTML = `<table class="perf-table"><thead><tr><th>Setup</th><th>Trades</th><th>Win%</th><th>P&L</th></tr></thead><tbody>
-    ${bys.data.map(r => `<tr><td>${r.setup_type||'—'}</td><td>${r.count}</td>
+    ${rows.map(r => `<tr><td>${r.setup_type||'—'}</td><td>${r.count}</td>
     <td class="${r.win_rate>.55?'up':r.win_rate<.4?'down':''}">${r.win_rate!=null?(r.win_rate*100).toFixed(0)+'%':'—'}</td>
     <td class="${pnlClass(r.total_pnl)}">${fmt$(r.total_pnl)}</td></tr>`).join('')}
     </tbody></table>`;
@@ -711,33 +972,30 @@ async function loadHealth() {
   if (sch?.data) {
     const ok = sch.data.running !== false;
     el('h-scheduler').textContent = ok ? 'Running' : 'Stopped';
-    el('h-scheduler').className = 'hc-val ' + (ok ? 'hc-ok' : 'hc-err');
-    const me = sch.data.meta_model_enabled;
-    const samples = sch.data.n_features ? `${sch.data.n_features} features` : '';
-    el('rb-samples').textContent = samples || '—';
+    el('h-scheduler').className   = 'hc-val ' + (ok ? 'hc-ok' : 'hc-err');
+    el('rb-samples').textContent  = sch.data.n_features ? `${sch.data.n_features} features` : '—';
   }
   if (ks?.data) {
     _ksActive = ks.data.active === true;
-    const btn = el('ks-btn');
+    const btn  = el('ks-btn');
     const ksEl = el('h-ks');
     if (_ksActive) {
-      btn.className = 'ks-btn ks-active';
+      btn.className  = 'ks-btn ks-active';
       btn.textContent = '🔴 KILL ACTIVE';
       ksEl.textContent = 'ACTIVE — no new trades';
-      ksEl.className = 'hc-val hc-err';
+      ksEl.className   = 'hc-val hc-err';
     } else {
-      btn.className = 'ks-btn ks-inactive';
+      btn.className  = 'ks-btn ks-inactive';
       btn.textContent = '⚡ KILL SWITCH';
       ksEl.textContent = 'Inactive';
-      ksEl.className = 'hc-val hc-ok';
+      ksEl.className   = 'hc-val hc-ok';
     }
   }
-  // cache
   const ca = await apiFetch('/api/health/cache');
   if (ca?.data) {
     const stale = Object.values(ca.data).some(v => v?.stale);
     el('h-cache').textContent = stale ? 'Stale layers' : 'Fresh';
-    el('h-cache').className = 'hc-val ' + (stale ? 'hc-warn' : 'hc-ok');
+    el('h-cache').className   = 'hc-val ' + (stale ? 'hc-warn' : 'hc-ok');
   }
 }
 
@@ -770,6 +1028,8 @@ async function refreshAll(manual=false) {
     loadNews(),
     loadEco(),
     loadHealth(),
+    loadMacro(),   // v13
+    loadLedger(),  // v13
   ]);
   await Promise.all([loadWatchlist(), loadInsider(), loadAnalyst()]);
   loadPerformance();
