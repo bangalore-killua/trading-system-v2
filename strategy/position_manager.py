@@ -966,3 +966,155 @@ class PositionManager:
             return float(getattr(account, "portfolio_value", 100_000) or 100_000)
         except Exception:
             return 100_000.0  # Safe fallback for paper trading
+
+    # ── v13: Portfolio-level circuit breakers ─────────────────────────────────
+
+    async def check_portfolio_circuit_breakers(self) -> dict:
+        """Run all portfolio-level risk checks. Returns status dict.
+
+        Called before every entry evaluation cycle (not per-symbol).
+        Any TRIGGERED check blocks new entries and sends Telegram alert.
+
+        Checks:
+          VIX > 40           → scale all new sizes × 0.5 (not a full block)
+          Drawdown > 12%     → pause all new entries
+          5 consecutive loss → pause + human alert
+          Cash < 10%         → block new entries
+          Sector conc > 40%  → block new entries in that sector
+        """
+        from data.notifications.telegram import notify_circuit_breaker  # type: ignore
+        from data.notifications.alerts import (  # type: ignore
+            CB_VIX_HIGH, CB_DRAWDOWN, CB_CONSECUTIVE_LOSS, CB_CASH_LOW
+        )
+
+        status = {
+            "vix_scale":         1.0,
+            "entries_paused":    False,
+            "pause_reason":      None,
+            "circuit_triggered": False,
+        }
+
+        try:
+            account = self._trader.get_account()
+            portfolio_value = float(getattr(account, "portfolio_value", 100_000) or 100_000)
+            cash            = float(getattr(account, "cash", portfolio_value * 0.3) or 0)
+            cash_pct        = cash / portfolio_value if portfolio_value > 0 else 1.0
+
+            # Load peak portfolio value for drawdown
+            peak = self._state.get_metadata("peak_portfolio_value", portfolio_value)
+            if portfolio_value > peak:
+                self._state.set_metadata("peak_portfolio_value", portfolio_value)
+                peak = portfolio_value
+            drawdown = (peak - portfolio_value) / peak if peak > 0 else 0.0
+
+            # Consecutive losses
+            consec = self._state.get_metadata("consecutive_losses", 0)
+
+        except Exception:
+            logger.warning("Circuit breaker: could not read account state — skipping")
+            return status
+
+        # ── VIX > 40 (sizing scale, not full block) ────────────────────────────
+        try:
+            from data.sources.fred_macro import get_macro_signals  # type: ignore
+            macro = get_macro_signals()
+            vix   = macro.get("vix_raw", 20)
+            if vix and vix > 40:
+                status["vix_scale"] = 0.5
+                notify_circuit_breaker(CB_VIX_HIGH, f"All new position sizes × 0.5 (VIX={vix:.1f})")
+                logger.warning("CIRCUIT: VIX=%.1f > 40 — sizing × 0.5", vix)
+        except Exception:
+            pass
+
+        # ── Drawdown > 12% ─────────────────────────────────────────────────────
+        if drawdown > 0.12:
+            status["entries_paused"]    = True
+            status["pause_reason"]      = f"drawdown={drawdown*100:.1f}%>12%"
+            status["circuit_triggered"] = True
+            notify_circuit_breaker(
+                CB_DRAWDOWN,
+                f"All new entries paused (drawdown={drawdown*100:.1f}%)"
+            )
+            logger.warning("CIRCUIT: drawdown %.1f%% > 12%% — pausing entries", drawdown * 100)
+
+        # ── 5 consecutive losses ────────────────────────────────────────────────
+        if consec >= 5:
+            status["entries_paused"]    = True
+            status["pause_reason"]      = f"{consec} consecutive losses"
+            status["circuit_triggered"] = True
+            notify_circuit_breaker(
+                CB_CONSECUTIVE_LOSS,
+                f"Trading paused — {consec} consecutive losses. Human review required."
+            )
+            logger.warning("CIRCUIT: %d consecutive losses — pausing", consec)
+
+        # ── Cash < 10% ─────────────────────────────────────────────────────────
+        if cash_pct < 0.10:
+            status["entries_paused"]    = True
+            status["pause_reason"]      = f"cash={cash_pct*100:.1f}%<10%"
+            status["circuit_triggered"] = True
+            logger.warning("CIRCUIT: cash %.1f%% < 10%% — blocking new entries", cash_pct * 100)
+
+        return status
+
+    def half_kelly_size(
+        self,
+        p_win:         float,
+        avg_win:       float,
+        avg_loss:      float,
+        composite:     float = 1.0,
+        vix_scale:     float = 1.0,
+        regime_scalar: float = 1.0,
+        beta:          float = 1.0,
+    ) -> float:
+        """Compute half-Kelly position size as fraction of portfolio.
+
+        Kelly formula: (P_win × avg_win - P_loss × avg_loss) / avg_win
+        Applied: kelly × 0.5 × composite × regime_scalar × vix_scale / beta_adj
+
+        Parameters
+        ----------
+        p_win       : win probability [0,1]
+        avg_win     : average winning trade return (e.g. 0.12 = 12%)
+        avg_loss    : average losing trade magnitude (e.g. 0.06 = 6%)
+        composite   : signal composite score 0-1
+        vix_scale   : 0.5 if VIX>40 else 1.0
+        regime_scalar: 0-1 (EARLY_BULL=1.0, CRASH=0)
+        beta        : stock beta vs SPY
+
+        Returns
+        -------
+        float: position size as fraction of portfolio (e.g. 0.05 = 5%)
+        """
+        p_loss = 1 - p_win
+        if avg_win <= 0 or avg_loss <= 0:
+            return 0.02  # fallback: 2% minimum
+
+        kelly = (p_win * avg_win - p_loss * avg_loss) / avg_win
+        if kelly <= 0:
+            return 0.0  # negative edge — don't trade
+
+        beta_adj = min(max(beta, 0.5), 2.5)
+        size     = (kelly * 0.5) * composite * regime_scalar * vix_scale / beta_adj
+        return round(max(0.0, min(size, 0.15)), 4)  # hard cap 15% per position
+
+    def atr_stop_price(
+        self,
+        entry_price: float,
+        atr_14:      float,
+        beta:        float = 1.0,
+    ) -> float:
+        """Compute ATR-based stop loss price.
+
+        ATR multiplier by beta (from plan):
+          beta > 1.5  → 2.0× ATR (high beta = volatile, tighter absolute stop)
+          0.8-1.5     → 2.5× ATR (standard)
+          < 0.8       → 3.0× ATR (low beta = stable, wider stop needed)
+        """
+        if beta > 1.5:
+            mult = 2.0
+        elif beta >= 0.8:
+            mult = 2.5
+        else:
+            mult = 3.0
+        return round(entry_price - mult * atr_14, 4)

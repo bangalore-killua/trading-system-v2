@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>trading-system-v2 / terminal</title>
 
-<!-- Lightweight Charts v5 -->
+<!-- TradingView widget (replaces Lightweight Charts for main chart) -->
+<script src="https://s3.tradingview.com/tv.js"></script>
+<!-- Lightweight Charts kept for FRED sparklines -->
 <script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
 
 <!-- Cytoscape.js for knowledge graph spider web -->
@@ -184,6 +186,77 @@ tr:hover td { background: var(--bg-hover); }
   margin-bottom: 12px;
 }
 
+/* ── TradingView widget wrapper ──────────────────────────────── */
+#tv-chart-wrapper {
+  position: relative;
+  height: 500px;
+  margin-bottom: 12px;
+}
+#tv-chart-widget {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+/* Tranche overlay canvas — sits on top of TradingView */
+#tranche-canvas {
+  position: absolute;
+  top: 0; left: 0;
+  pointer-events: none;
+  border-radius: 8px;
+}
+
+/* ── 9 TF button row ─────────────────────────────────────────── */
+.tf-row { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; }
+.tf-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--mono);
+  transition: all 0.15s;
+}
+.tf-btn:hover  { border-color: var(--accent); color: var(--text-primary); }
+.tf-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(99,102,241,0.1); }
+
+/* ── Position panels ─────────────────────────────────────────── */
+.positions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .positions-grid { grid-template-columns: 1fr; } }
+.position-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+.position-panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); margin-bottom: 10px; }
+.exit-badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:9px; font-weight:700; }
+.exit-e1 { background:rgba(251,191,36,0.15); color:var(--yellow); }
+.exit-e2 { background:rgba(255,100,68,0.15); color:#ff6444; }
+.exit-e3 { background:rgba(255,68,68,0.12); color:var(--red); }
+.tranche-t1 { background:rgba(99,102,241,0.1); color:var(--accent); }
+.tranche-t2 { background:rgba(99,102,241,0.2); color:var(--accent); }
+.tranche-t3 { background:rgba(99,102,241,0.3); color:#a5b4fc; }
+
+/* ── Financials sub-tabs ─────────────────────────────────────── */
+.sub-tabs { display:flex; gap:0; margin-bottom:12px; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+.sub-tab { padding:5px 14px; font-size:11px; cursor:pointer; color:var(--text-dim); background:transparent; transition:all 0.2s; border:none; }
+.sub-tab:hover  { color:var(--text-primary); background:var(--bg-hover); }
+.sub-tab.active { color:var(--accent); background:rgba(99,102,241,0.1); }
+.sub-tab-content { display:none; }
+.sub-tab-content.active { display:block; }
+.neg-value { color: var(--red); }
+
+/* ── Analyst bar ─────────────────────────────────────────────── */
+.analyst-bar { display:flex; height:20px; border-radius:4px; overflow:hidden; margin:10px 0; }
+.analyst-bar-seg { transition: width 0.3s; }
+.seg-buy    { background:#00ff88; }
+.seg-hold   { background:#fbbf24; }
+.seg-sell   { background:#ff4444; }
+
+/* ── Earnings beat/miss ──────────────────────────────────────── */
+.beat  { color:var(--green); }
+.miss  { color:var(--red); }
+.inline-chip { display:inline-block; padding:1px 5px; border-radius:3px; font-size:9px; margin-left:4px; }
+
 /* ── Knowledge graph (Cytoscape) ─────────────────────────────── */
 #cy-container {
   height: 420px;
@@ -293,9 +366,12 @@ tr:hover td { background: var(--bg-hover); }
   <div id="symbol-panel" style="display:none">
     <div class="tabs" id="symbol-tabs">
       <div class="tab active" onclick="switchTab('overview')">Overview</div>
-      <div class="tab" onclick="switchTab('chart')">Chart + Patterns</div>
+      <div class="tab" onclick="switchTab('chart')">Chart</div>
+      <div class="tab" onclick="switchTab('analysis')">Analysis</div>
+      <div class="tab" onclick="switchTab('earnings')">Earnings</div>
+      <div class="tab" onclick="switchTab('financials')">Financials</div>
+      <div class="tab" onclick="switchTab('holdings')">Holdings</div>
       <div class="tab" onclick="switchTab('options')">Options</div>
-      <div class="tab" onclick="switchTab('fundamentals')">Fundamentals</div>
       <div class="tab" onclick="switchTab('filings')">Filings</div>
       <div class="tab" onclick="switchTab('news-tab')">News</div>
       <div class="tab" onclick="switchTab('graph-tab')">Relations</div>
@@ -307,17 +383,58 @@ tr:hover td { background: var(--bg-hover); }
       <div id="overview-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
     </div>
 
-    <!-- Chart + Patterns -->
+    <!-- Chart (TradingView widget + 9 TF buttons + tranche canvas overlay) -->
     <div class="tab-content" id="tab-chart">
-      <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <button class="btn-ghost" onclick="loadChart('1mo')">1M</button>
-        <button class="btn-ghost active" onclick="loadChart('3mo')">3M</button>
-        <button class="btn-ghost" onclick="loadChart('6mo')">6M</button>
-        <button class="btn-ghost" onclick="loadChart('1y')">1Y</button>
+      <div class="tf-row">
+        <button class="tf-btn" onclick="setTF('1')">1m</button>
+        <button class="tf-btn" onclick="setTF('5')">5m</button>
+        <button class="tf-btn" onclick="setTF('15')">15m</button>
+        <button class="tf-btn" onclick="setTF('30')">30m</button>
+        <button class="tf-btn" onclick="setTF('60')">1H</button>
+        <button class="tf-btn active" onclick="setTF('240')">4H</button>
+        <button class="tf-btn" onclick="setTF('D')">1D</button>
+        <button class="tf-btn" onclick="setTF('W')">1W</button>
+        <button class="tf-btn" onclick="setTF('M')">1M</button>
       </div>
-      <div id="chart-container"></div>
+      <div id="tv-chart-wrapper">
+        <div id="tv-chart-widget"></div>
+        <canvas id="tranche-canvas"></canvas>
+      </div>
       <h2 style="margin-top:16px;margin-bottom:12px;">Detected Patterns</h2>
       <div id="patterns-content" class="patterns-grid"><span class="loading-text">Select a symbol and click Analyse</span></div>
+    </div>
+
+    <!-- Analysis tab (analyst ratings + scenarios) -->
+    <div class="tab-content" id="tab-analysis">
+      <div id="analysis-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+    </div>
+
+    <!-- Earnings tab -->
+    <div class="tab-content" id="tab-earnings">
+      <div id="earnings-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+    </div>
+
+    <!-- Financials tab (Income / Balance / CashFlow sub-tabs, Quarterly/Annual toggle) -->
+    <div class="tab-content" id="tab-financials">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+        <div class="sub-tabs" id="fin-sub-tabs">
+          <button class="sub-tab active" onclick="switchFinSub('income')">Income</button>
+          <button class="sub-tab" onclick="switchFinSub('balance')">Balance Sheet</button>
+          <button class="sub-tab" onclick="switchFinSub('cashflow')">Cash Flow</button>
+        </div>
+        <div style="display:flex;gap:4px;margin-left:auto;">
+          <button class="tf-btn active" id="fin-quarterly-btn" onclick="setFinPeriod('quarterly')">Quarterly</button>
+          <button class="tf-btn" id="fin-annual-btn" onclick="setFinPeriod('annual')">Annual</button>
+        </div>
+      </div>
+      <div class="sub-tab-content active" id="fin-income"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+      <div class="sub-tab-content" id="fin-balance"></div>
+      <div class="sub-tab-content" id="fin-cashflow"></div>
+    </div>
+
+    <!-- Holdings tab -->
+    <div class="tab-content" id="tab-holdings">
+      <div id="holdings-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
     </div>
 
     <!-- Options -->
@@ -357,6 +474,20 @@ tr:hover td { background: var(--bg-hover); }
     <!-- COT -->
     <div class="tab-content" id="tab-cot-tab">
       <div id="cot-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── v13: Position panels (short-term + long-term) ─────────── -->
+<section>
+  <div class="positions-grid">
+    <div class="position-panel">
+      <h3>Short-term Positions</h3>
+      <div id="short-positions-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
+    </div>
+    <div class="position-panel">
+      <h3>Long-term Positions (3yr+)</h3>
+      <div id="long-positions-content"><span class="loading-text"><span class="spinner"></span>Loading...</span></div>
     </div>
   </div>
 </section>
@@ -421,10 +552,13 @@ tr:hover td { background: var(--bg-hover); }
 
 <script>
 /* ── State ─────────────────────────────────────────────────── */
-let currentSymbol = '';
-let chart = null;
-let cy = null;
-let chartSeries = null;
+let currentSymbol  = '';
+let chart          = null;
+let cy             = null;
+let chartSeries    = null;
+let tvWidget       = null;
+let currentTF      = '240';   // default 4H
+let finPeriod      = 'quarterly';
 
 /* ── Helpers ────────────────────────────────────────────────── */
 const $ = id => document.getElementById(id);
@@ -448,8 +582,10 @@ window.addEventListener('DOMContentLoaded', () => {
   loadRiskMetrics();
   loadFredSparklines();
   loadCalendar();
+  loadPositionPanels();
   setInterval(loadMacro, 60000);
   setInterval(loadIndices, 30000);
+  setInterval(loadPositionPanels, 120000);
   $('symbol-input').addEventListener('keydown', e => { if (e.key === 'Enter') analyseSymbol(); });
   updateTimestamp();
 });
@@ -497,8 +633,12 @@ async function analyseSymbol() {
 
   // Load all tabs in parallel
   loadOverview(sym);
-  loadChart('3mo');
+  loadTVChart(sym, currentTF);
   loadPatterns(sym);
+  loadAnalysis(sym);
+  loadEarnings(sym);
+  loadFinancials(sym, finPeriod);
+  loadHoldings(sym);
   loadOptions(sym);
   loadFundamentals(sym);
   loadFilings(sym);
@@ -524,18 +664,30 @@ async function loadOverview(sym) {
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;">
       ${kv('Price', '$' + fmtNum(q.price))}
       ${kv('Change', fmtPct(q.change_pct), pctClass(q.change_pct))}
+      ${kv('Open', q.price != null ? '$' + fmtNum(q.price) : '–')}
+      ${kv('Day High', '$' + fmtNum(q['52w_high']))}
+      ${kv('Day Low', '$' + fmtNum(q['52w_low']))}
+      ${kv('Volume', fmtLarge(q.volume))}
+      ${kv('Avg Vol 10d', fmtLarge(q.avg_volume_10d))}
       ${kv('Market Cap', fmtLarge(q.market_cap))}
       ${kv('52W High', '$' + fmtNum(q['52w_high']))}
       ${kv('52W Low', '$' + fmtNum(q['52w_low']))}
-      ${kv('Avg Vol 10d', fmtLarge(q.avg_volume_10d))}
       ${kv('P/E (trailing)', fmtNum(f.pe_trailing))}
+      ${kv('P/E (forward)', fmtNum(f.pe_forward))}
+      ${kv('PEG Ratio', fmtNum(f.price_to_book))}
       ${kv('EPS (trailing)', '$' + fmtNum(f.eps_trailing))}
+      ${kv('EPS (forward)', '$' + fmtNum(f.eps_forward))}
       ${kv('ROE', f.roe != null ? (f.roe * 100).toFixed(1) + '%' : '–')}
       ${kv('Profit Margin', f.profit_margin != null ? (f.profit_margin * 100).toFixed(1) + '%' : '–')}
+      ${kv('Free Cash Flow', fmtLarge(f.fcf))}
+      ${kv('Div Yield', f.dividend_yield != null ? (f.dividend_yield * 100).toFixed(2) + '%' : '–')}
+      ${kv('Shares Out', fmtLarge(f.shares_outstanding))}
+      ${kv('Employees', f.employees != null ? f.employees.toLocaleString() : '–')}
       ${kv('Beta', fmtNum(q.beta))}
       ${kv('Sector', f.sector || '–')}
+      ${kv('Industry', f.industry || '–')}
     </div>
-    <div style="margin-top:12px;font-size:11px;color:var(--text-dim);line-height:1.6;">${(f.description || '').slice(0,400)}${f.description && f.description.length > 400 ? '…' : ''}</div>
+    <div style="margin-top:12px;font-size:11px;color:var(--text-dim);line-height:1.6;">${(f.description || '').slice(0,500)}${f.description && f.description.length > 500 ? '…' : ''}</div>
   `;
 }
 
@@ -551,43 +703,83 @@ function fmtLarge(v) {
   return v.toLocaleString();
 }
 
-/* ── Chart tab ──────────────────────────────────────────────── */
-async function loadChart(period) {
-  document.querySelectorAll('.btn-ghost').forEach(b => {
-    if (['1mo','3mo','6mo','1y'].includes(b.textContent.replace('M','mo').replace('Y','y').toLowerCase())) {
-      b.classList.remove('active');
-    }
-  });
-  if (!currentSymbol) return;
+/* ── TradingView widget ─────────────────────────────────────── */
+function loadTVChart(sym, tf) {
+  if (!sym) return;
+  currentTF = tf;
+  const container = $('tv-chart-widget');
+  container.innerHTML = '';
 
-  const el = $('chart-container');
-  el.innerHTML = '';
+  // Resize tranche canvas to match
+  const wrapper = $('tv-chart-wrapper');
+  const canvas  = $('tranche-canvas');
+  canvas.width  = wrapper.offsetWidth;
+  canvas.height = wrapper.offsetHeight;
 
-  try {
-    chart = LightweightCharts.createChart(el, {
-      layout: { background: { color: '#1a1a28' }, textColor: '#64748b' },
-      grid: { vertLines: { color: '#2d2d4a' }, horzLines: { color: '#2d2d4a' } },
-      rightPriceScale: { borderColor: '#2d2d4a' },
-      timeScale: { borderColor: '#2d2d4a', timeVisible: true },
-    });
-
-    const resp = await fetch('/api/ohlcv/' + currentSymbol + '?period=' + period);
-    const data = await resp.json();
-
-    if (data.status === 'ok' && data.data && data.data.length > 0) {
-      const candleSeries = chart.addCandlestickSeries({
-        upColor: '#00ff88', downColor: '#ff4444',
-        borderUpColor: '#00ff88', borderDownColor: '#ff4444',
-        wickUpColor: '#00ff88', wickDownColor: '#ff4444',
-      });
-      candleSeries.setData(data.data);
-      chart.timeScale().fitContent();
-    } else {
-      el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim)">No price data available</div>';
-    }
-  } catch(e) {
-    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim)">${e.message}</div>`;
+  if (typeof TradingView === 'undefined') {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim)">TradingView widget not loaded</div>';
+    return;
   }
+
+  tvWidget = new TradingView.widget({
+    symbol:        'NASDAQ:' + sym,
+    interval:      tf,
+    container_id:  'tv-chart-widget',
+    theme:         'dark',
+    style:         '1',       // candlestick
+    locale:        'en',
+    width:         '100%',
+    height:        500,
+    toolbar_bg:    '#12121a',
+    hide_side_toolbar: false,
+    allow_symbol_change: false,
+    studies:       ['MASimple@tv-basicstudies', 'RSI@tv-basicstudies', 'Volume@tv-basicstudies'],
+  });
+
+  // Re-draw tranche overlay after widget loads (0.5s delay for iframe)
+  setTimeout(() => drawTrancheOverlay(sym), 1500);
+}
+
+function setTF(tf) {
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  currentTF = tf;
+  if (currentSymbol) loadTVChart(currentSymbol, tf);
+}
+
+async function drawTrancheOverlay(sym) {
+  const canvas = $('tranche-canvas');
+  if (!canvas) return;
+  const ctx  = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Fetch open positions for this symbol to draw entry/tranche lines
+  try {
+    const d = await api('/api/ledger/' + sym);
+    if (d.status !== 'ok') return;
+    const openTrades = (d.data || []).filter(t => !t.exit_date);
+    if (!openTrades.length) return;
+
+    // Draw horizontal price lines for each open tranche
+    // (pixel Y position is approximate — TradingView controls exact price scale)
+    openTrades.forEach((t, i) => {
+      const y = 50 + i * 30;
+      ctx.strokeStyle = '#6366f1';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvas.width, y);
+      ctx.stroke();
+
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(99,102,241,0.85)';
+      ctx.fillRect(6, y - 9, 110, 16);
+      ctx.fillStyle = '#fff';
+      ctx.font = '9px monospace';
+      ctx.fillText('T' + (i+1) + ' entry $' + (t.entry_price || '?'), 10, y + 3);
+    });
+  } catch(e) { /* overlay is non-critical */ }
 }
 
 /* ── Patterns tab ───────────────────────────────────────────── */
@@ -864,6 +1056,246 @@ async function loadCalendar() {
       <span style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">${e.forecast != null ? 'F: '+e.forecast : ''}</span>
       <span style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">${e.previous != null ? 'P: '+e.previous : ''}</span>
     </div>`).join('');
+}
+
+/* ── v13: Analysis tab ──────────────────────────────────────── */
+async function loadAnalysis(sym) {
+  $('analysis-content').innerHTML = '<span class="loading-text"><span class="spinner"></span>Loading analyst data...</span>';
+  const d = await api('/api/analysis/' + sym);
+  if (d.status !== 'ok') { $('analysis-content').innerHTML = 'Error loading analysis'; return; }
+  const data = d.data || {};
+  const pt   = data.price_target || {};
+  const recs = data.recommendations || [];
+
+  // Count buy/hold/sell for bar
+  let buys = 0, holds = 0, sells = 0;
+  recs.forEach(r => {
+    const g = (r.to_grade || '').toLowerCase();
+    if (g.includes('buy') || g.includes('outperform') || g.includes('overweight')) buys++;
+    else if (g.includes('sell') || g.includes('underperform') || g.includes('underweight')) sells++;
+    else holds++;
+  });
+  const total = buys + holds + sells || 1;
+  const buyPct = (buys / total * 100).toFixed(0);
+  const holdPct = (holds / total * 100).toFixed(0);
+  const sellPct = (100 - +buyPct - +holdPct);
+
+  const sc = data.scenarios || {};
+  const scenHtml = Object.keys(sc).length ? `
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">AI Scenarios (Claude Haiku)</div>
+      <table><tbody>
+        ${sc.bear  ? `<tr><th style="width:60px;color:var(--red)">BEAR</th><td style="font-size:11px">${sc.bear}</td></tr>` : ''}
+        ${sc.base  ? `<tr><th style="color:var(--yellow)">BASE</th><td style="font-size:11px">${sc.base}</td></tr>` : ''}
+        ${sc.bull  ? `<tr><th style="color:var(--green)">BULL</th><td style="font-size:11px">${sc.bull}</td></tr>` : ''}
+      </tbody></table>
+    </div>` : '';
+
+  $('analysis-content').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:14px">
+      ${kv('Mean PT', pt.mean ? '$' + fmtNum(pt.mean) : '–')}
+      ${kv('High PT', pt.high ? '$' + fmtNum(pt.high) : '–')}
+      ${kv('Low PT',  pt.low  ? '$' + fmtNum(pt.low)  : '–')}
+      ${kv('Analysts', pt.analyst_count ?? '–')}
+      ${kv('Consensus', (data.recommendation_key || '–').toUpperCase())}
+    </div>
+    <div class="card-title">Analyst Breakdown (last ${recs.length} ratings)</div>
+    <div class="analyst-bar">
+      <div class="analyst-bar-seg seg-buy"  style="width:${buyPct}%" title="Buy ${buys}"></div>
+      <div class="analyst-bar-seg seg-hold" style="width:${holdPct}%" title="Hold ${holds}"></div>
+      <div class="analyst-bar-seg seg-sell" style="width:${sellPct}%" title="Sell ${sells}"></div>
+    </div>
+    <div style="font-size:10px;color:var(--text-dim);margin-bottom:12px">
+      Buy ${buys} · Hold ${holds} · Sell ${sells}
+    </div>
+    <div class="card">
+      <div class="card-title">Recent Rating Changes</div>
+      <table>
+        <thead><tr><th>Date</th><th>Firm</th><th>Action</th><th>Rating</th></tr></thead>
+        <tbody>${recs.slice(0,10).map(r => `
+          <tr>
+            <td>${r.date}</td>
+            <td>${r.firm}</td>
+            <td><span class="badge badge-neutral">${r.action}</span></td>
+            <td>${r.to_grade} ${r.from_grade ? '← ' + r.from_grade : ''}</td>
+          </tr>`).join('') || '<tr><td colspan="4" style="color:var(--text-dim)">No recent ratings</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+    ${scenHtml}`;
+}
+
+/* ── v13: Earnings tab ──────────────────────────────────────── */
+async function loadEarnings(sym) {
+  $('earnings-content').innerHTML = '<span class="loading-text"><span class="spinner"></span>Loading earnings...</span>';
+  const d = await api('/api/earnings/' + sym);
+  if (d.status !== 'ok') { $('earnings-content').innerHTML = 'Error loading earnings'; return; }
+  const data  = d.data || {};
+  const rows  = data.quarterly || [];
+  const filings = data.filings || [];
+
+  const earningsRows = rows.map(r => {
+    const beat = r.surprise_pct != null ? (r.surprise_pct >= 0) : null;
+    const chip = beat === true  ? '<span class="inline-chip" style="background:rgba(0,255,136,0.15);color:var(--green)">BEAT</span>'
+               : beat === false ? '<span class="inline-chip" style="background:rgba(255,68,68,0.12);color:var(--red)">MISS</span>'
+               : '';
+    return `<tr>
+      <td>${r.date}</td>
+      <td style="font-family:var(--mono)">${r.actual_eps != null ? '$'+r.actual_eps.toFixed(2) : '–'}</td>
+      <td style="font-family:var(--mono)">${r.estimate_eps != null ? '$'+r.estimate_eps.toFixed(2) : '–'}</td>
+      <td style="font-family:var(--mono)" class="${r.surprise_pct >= 0 ? 'beat' : 'miss'}">${r.surprise_pct != null ? (r.surprise_pct >= 0 ? '+' : '') + r.surprise_pct.toFixed(1) + '%' : '–'} ${chip}</td>
+      <td style="font-family:var(--mono)">${r.revenue ? fmtLarge(r.revenue) : '–'}</td>
+    </tr>`;
+  }).join('');
+
+  $('earnings-content').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:14px">
+      ${kv('Next Earnings', Array.isArray(data.next_earnings_date) ? data.next_earnings_date[0] : (data.next_earnings_date || '–'))}
+      ${kv('EPS (Trailing)', data.trailing_eps != null ? '$'+fmtNum(data.trailing_eps) : '–')}
+      ${kv('EPS (Forward)',  data.forward_eps  != null ? '$'+fmtNum(data.forward_eps)  : '–')}
+      ${kv('P/E (Trailing)', data.trailing_pe  != null ? fmtNum(data.trailing_pe)       : '–')}
+      ${kv('P/E (Forward)',  data.forward_pe   != null ? fmtNum(data.forward_pe)        : '–')}
+    </div>
+    <div class="card">
+      <div class="card-title">Earnings History (last 8 quarters)</div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Quarter</th><th>EPS Actual</th><th>EPS Est</th><th>Surprise</th><th>Revenue</th></tr></thead>
+          <tbody>${earningsRows || '<tr><td colspan="5" style="color:var(--text-dim)">No earnings data</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    ${filings.length ? `
+    <div class="card" style="margin-top:12px">
+      <div class="card-title">Related SEC Filings</div>
+      <table><tbody>${filings.slice(0,6).map(f => `
+        <tr>
+          <td><span class="badge badge-neutral">${f.form}</span></td>
+          <td>${f.date}</td>
+          <td><a href="${f.url}" target="_blank" style="color:var(--accent);font-size:11px;">${(f.description||'').slice(0,60)}</a></td>
+        </tr>`).join('')}
+      </tbody></table>
+    </div>` : ''}`;
+}
+
+/* ── v13: Financials tab ────────────────────────────────────── */
+let _finData = null;
+
+function switchFinSub(sub) {
+  document.querySelectorAll('.sub-tab').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  document.querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
+  $('fin-' + sub).classList.add('active');
+}
+
+function setFinPeriod(p) {
+  finPeriod = p;
+  $('fin-quarterly-btn').classList.toggle('active', p === 'quarterly');
+  $('fin-annual-btn').classList.toggle('active', p === 'annual');
+  if (currentSymbol) loadFinancials(currentSymbol, p);
+}
+
+function renderFinTable(rows) {
+  if (!rows || !rows.length) return '<span class="loading-text">No data</span>';
+  const keys = Object.keys(rows[0]).filter(k => !k.endsWith('_raw') && !k.endsWith('_negative') && k !== 'date');
+  return `<div style="overflow-x:auto"><table>
+    <thead><tr><th>Field</th>${rows.map(r => `<th>${r.date || ''}</th>`).join('')}</tr></thead>
+    <tbody>${keys.slice(0, 30).map(k => `
+      <tr>
+        <th style="font-size:11px;max-width:200px;white-space:nowrap">${k.replace(/_/g,' ')}</th>
+        ${rows.map(r => {
+          const neg = r[k + '_negative'];
+          return `<td style="font-family:var(--mono);font-size:11px${neg ? ';color:var(--red)' : ''}">${r[k] || '–'}</td>`;
+        }).join('')}
+      </tr>`).join('')}
+    </tbody>
+  </table></div>`;
+}
+
+async function loadFinancials(sym, period) {
+  $('fin-income').innerHTML = '<span class="loading-text"><span class="spinner"></span>Loading...</span>';
+  const d = await api('/api/financials/' + sym + '?period=' + period);
+  if (d.status !== 'ok') { $('fin-income').innerHTML = 'Error loading financials'; return; }
+  const data = d.data || {};
+  $('fin-income').innerHTML   = renderFinTable(data.income_statement);
+  $('fin-balance').innerHTML  = renderFinTable(data.balance_sheet);
+  $('fin-cashflow').innerHTML = renderFinTable(data.cash_flow);
+}
+
+/* ── v13: Holdings tab ──────────────────────────────────────── */
+async function loadHoldings(sym) {
+  $('holdings-content').innerHTML = '<span class="loading-text"><span class="spinner"></span>Loading holdings...</span>';
+  const d = await api('/api/holdings/' + sym);
+  if (d.status !== 'ok') { $('holdings-content').innerHTML = 'Error loading holdings'; return; }
+  const data  = d.data || {};
+
+  const renderHolderTable = (rows, cols) => {
+    if (!rows || !rows.length) return '<p style="color:var(--text-dim);font-size:11px">No data</p>';
+    return `<div style="overflow-x:auto"><table>
+      <thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead>
+      <tbody>${rows.slice(0,10).map(r =>
+        `<tr>${cols.map(([, key]) => `<td style="font-family:var(--mono);font-size:11px">${r[key] ?? '–'}</td>`).join('')}</tr>`
+      ).join('')}</tbody>
+    </table></div>`;
+  };
+
+  const instCols = [['Holder','holder'],['Shares','shares'],['Value','value'],['% Held','pct_held'],['Date','date_reported']];
+  const insCols  = [['Name','name'],['Title','title'],['Type','transaction'],['Shares','shares'],['Value','value'],['Date','date']];
+  const polCols  = [['Politician','politician'],['Chamber','chamber'],['Type','trade_type'],['Disclosed','disclosure_date']];
+
+  $('holdings-content').innerHTML = `
+    <div class="card"><div class="card-title">Institutional Holders (Top 10)</div>${renderHolderTable(data.institutional, instCols)}</div>
+    <div class="card" style="margin-top:12px"><div class="card-title">Mutual Fund Holders (Top 10)</div>${renderHolderTable(data.mutual_funds, instCols)}</div>
+    <div class="card" style="margin-top:12px"><div class="card-title">Insider Form 4 (last 90d)</div>${renderHolderTable(data.insiders, insCols)}</div>
+    ${data.politicians && data.politicians.length ? `
+    <div class="card" style="margin-top:12px"><div class="card-title">Politicians (STOCK Act)</div>${renderHolderTable(data.politicians, polCols)}</div>` : ''}`;
+}
+
+/* ── v13: Position panels ───────────────────────────────────── */
+async function loadPositionPanels() {
+  const d = await api('/api/ledger/open');
+  if (d.status !== 'ok') {
+    $('short-positions-content').innerHTML = '<span class="loading-text">No data</span>';
+    $('long-positions-content').innerHTML  = '<span class="loading-text">No data</span>';
+    return;
+  }
+  const positions = d.data || [];
+
+  // Short-term = setup_type not 'LONG_TERM'; Long-term = 'LONG_TERM'
+  const shortPositions = positions.filter(p => p.setup_type !== 'LONG_TERM');
+  const longPositions  = positions.filter(p => p.setup_type === 'LONG_TERM');
+
+  const renderShort = rows => {
+    if (!rows.length) return '<p style="color:var(--text-dim);font-size:11px">No open short-term positions</p>';
+    return `<table>
+      <thead><tr><th>Symbol</th><th>Tranche</th><th>Entry</th><th>Days</th><th>Setup</th></tr></thead>
+      <tbody>${rows.map(p => `
+        <tr>
+          <td><strong style="font-family:var(--mono);cursor:pointer;color:var(--accent)" onclick="$('symbol-input').value='${p.symbol}';analyseSymbol()">${p.symbol}</strong></td>
+          <td><span class="badge tranche-${(p.tier||'t1').toLowerCase()}">${p.tier || 'T1'}</span></td>
+          <td style="font-family:var(--mono)">$${fmtNum(p.entry_price)}</td>
+          <td>${Math.floor((Date.now() - new Date(p.entry_date).getTime()) / 86400000)}d</td>
+          <td><span class="badge badge-neutral" style="font-size:9px">${p.setup_type || '–'}</span></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+  };
+
+  const renderLong = rows => {
+    if (!rows.length) return '<p style="color:var(--text-dim);font-size:11px">No open long-term positions</p>';
+    return `<table>
+      <thead><tr><th>Symbol</th><th>Avg Cost</th><th>Since</th><th>Regime</th></tr></thead>
+      <tbody>${rows.map(p => `
+        <tr>
+          <td><strong style="font-family:var(--mono);cursor:pointer;color:var(--accent)" onclick="$('symbol-input').value='${p.symbol}';analyseSymbol()">${p.symbol}</strong></td>
+          <td style="font-family:var(--mono)">$${fmtNum(p.entry_price)}</td>
+          <td style="font-size:11px;color:var(--text-dim)">${p.entry_date ? p.entry_date.slice(0,10) : '–'}</td>
+          <td><span class="badge badge-neutral">${p.regime || '–'}</span></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+  };
+
+  $('short-positions-content').innerHTML = renderShort(shortPositions);
+  $('long-positions-content').innerHTML  = renderLong(longPositions);
 }
 
 /* ── AI Agents ───────────────────────────────────────────────── */
