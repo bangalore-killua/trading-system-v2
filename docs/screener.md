@@ -1,62 +1,114 @@
-# Universe Screener
+# Universe Screener (v13)
 
-## Overview
+## Philosophy
 
-`data/screener.py` builds the candidate universe using 4 parallel discovery methods, then scores each candidate with 5 percentile-based factor scores that become LightGBM input features.
+`data/screener.py` builds the candidate universe using 4 parallel discovery methods, then scores each candidate with **8 factor scores** (all 0–1 normalised) that feed the signal orchestrator as IC-weighted inputs.
 
-The screener does NOT eliminate stocks — it scores them. LightGBM learns which combinations of scores lead to wins.
+The screener does NOT eliminate stocks — it scores them. The composite score drives position size.
 
 ## Universe Building (4 methods, run in parallel)
 
 ### Method 1: Knowledge Graph Expansion
-- Takes user seeds → expands 1-2 hops through the supply-chain graph
-- Discovers APLD/ALAB because NVIDIA mentions them in its 10-K
+- User seeds → 1–2 hops through the SEC 10-K supply-chain graph
+- Discovers ALAB/APLD because NVIDIA mentions them as suppliers in its 10-K
 - Source: `data/knowledge_graph.py` (NetworkX, SEC 10-K regex extraction)
 
 ### Method 2: Theme Baskets
-- 10 pre-defined baskets (AI infrastructure, cloud, crypto, financials, energy, consumer, healthcare, defence, staples, metals)
-- Each basket: seed tickers + ETF tickers → pulls top-50 ETF holdings via finvizfinance
+- 10 pre-defined baskets: AI infrastructure, cloud, crypto, financials, energy, consumer, healthcare, defence, staples, metals
+- Each basket → top-50 ETF holdings via finvizfinance
 - Ensures cross-sector diversification
 
 ### Method 3: Momentum Expansion
 - Any US stock with >40% 3-month return, >$5 price, >200k avg volume
-- Source: TradingView screener (falls back to yfinance if unavailable)
+- Source: TradingView screener (falls back to yfinance)
 - Catches breakout names before mainstream coverage
 
 ### Method 4: User Seeds
-- Manually specified in `config.json` under `watchlist.mandatory` and `watchlist.manual_additions`
+- `config.json` → `watchlist.mandatory` and `watchlist.manual_additions`
+- Congressional buy → auto-adds to candidate pool via insider_score signal
 
-## Factor Scoring (5 scores → LightGBM features)
+## 8 Factor Scores (all 0–1 normalised)
 
-All scores are 0–100 percentile rankings. 50 = neutral/missing data.
+**v13 change from v12:** scores are now 0–1 (not 0–100 percentile). 0.5 = neutral / missing data.
 
-| Score | What it measures | Benchmark |
-|---|---|---|
-| `momentum_score` | 12-1 month price return | vs same theme basket peers |
-| `quality_score` | Return on equity (ROE) | vs same theme basket peers |
-| `technical_score` | RSI | vs stock's own 1-year RSI history |
-| `valuation_score` | Trailing P/E (lower = better) | vs same theme basket peers |
-| `news_score` | FinBERT aggregate last 7 days | linear mapping [-1,1] → [0,100] |
+```mermaid
+flowchart LR
+    MS["momentum_score\n12-1m price return\nvs same-basket peers"]
+    QS["quality_score\nROE vs sector peers"]
+    TS["technical_score\nRSI vs stock's 1yr history"]
+    VS["valuation_score\ntrailing P/E\nvs sector (lower=better)"]
+    NS["news_score\nFinBERT 7d aggregate\n+ headline velocity"]
+    OS["options_score\nUnusual Whales\ncall/put ratio + unusual premium\nPlaywright + Barchart fallback"]
+    MAC["macro_score\nFRED yield curve (T10Y2Y)\ncredit spread (BAMLH0A0HYM2)\nVIX term structure"]
+    IS["insider_score\nForm 4 insider buys/sells\n+ Congressional STOCK Act\nrecency-weighted [0.3, 0.8]"]
 
-## Watchlist Selection
+    SC["composite_score\n= Σ score_i × IC[score_i][regime]"]
 
-After scoring, `rank_candidates()` sorts by:
-1. LightGBM P(win) if scorecard is available
-2. Factor composite score (equal-weight average) if no scorecard yet
+    MS & QS & TS & VS & NS & OS & MAC & IS --> SC
+```
 
-Top 30 candidates (configurable in config.json `watchlist.max_size`) become the weekly watchlist.
+### Score Details
 
-## Configuration
+| Score | Source | Neutral | Range | Notes |
+|-------|--------|---------|-------|-------|
+| `momentum_score` | yfinance returns | 0.5 | 0–1 | Percentile vs same basket peers |
+| `quality_score` | yfinance ROE | 0.5 | 0–1 | Percentile vs sector |
+| `technical_score` | pandas-ta RSI | 0.5 | 0–1 | vs stock's own 1yr RSI history |
+| `valuation_score` | yfinance P/E | 0.5 | 0–1 | Lower P/E = higher score |
+| `news_score` | FinBERT + velocity | 0.5 | 0–1 | 7d aggregate + rate-of-change |
+| `options_score` | Unusual Whales | 0.5 | 0–1 | 0.5 if Playwright fails |
+| `macro_score` | FRED API | 0.5 | 0–1 | Shared across all symbols in batch |
+| `insider_score` | Congressional + Form 4 | 0.5 | 0.3–0.8 | 0.5 = no trades |
 
-```json
+### IC Weighting
+
+Each score's weight is `IC[score][regime]` = Spearman correlation between past score values and future alpha outcomes, computed per regime window on a rolling 90-day basis.
+
+```python
+# In MID_BULL: news_score IC might be highest → it gets most weight
+# In LATE_BULL: insider_score IC typically highest → accumulate before execs sell
+composite_score = Σ(score_i × IC[score_i][current_regime])
+```
+
+## Insider Score Detail
+
+**Congressional trades** (highest empirical IC of any alternative data):
+
+```
+Recency weights:
+  < 30 days since disclosure:  1.0×
+  30–60 days:                  0.5×
+  60–90 days:                  0.2×
+
+Amount weight:
+  min(amount_mid / $250,000, 3.0) × 0.2
+
+Buy ratio → score:
+  buy_ratio in [0, 1] → maps to [0.3, 0.8]
+  0.5 = neutral (no trades or perfectly mixed)
+  > 0.5 = net buying (bullish signal)
+  < 0.5 = net selling (bearish signal)
+```
+
+Sources (with fallback):
+1. CapitolTrades aggregator (both chambers, free)
+2. Senate EFTS (official Senate disclosures)
+6-hour file cache. No API key required.
+
+## `_neutral_scores()` (all 0.5)
+
+When any data source fails, the caller falls back to neutral defaults:
+```python
 {
-  "screener": {
-    "max_universe_size": 600
-  },
-  "watchlist": {
-    "max_size": 30,
-    "mandatory": ["SPY"],
-    "manual_additions": []
-  }
+    "momentum_score":  0.5,
+    "quality_score":   0.5,
+    "technical_score": 0.5,
+    "valuation_score": 0.5,
+    "news_score":      0.5,
+    "options_score":   0.5,
+    "macro_score":     0.5,
+    "insider_score":   0.5,
 }
 ```
+
+Neutral scores don't block trades — they contribute 0.5 to the weighted composite. The system always trades; neutral signals size down, not stop.
