@@ -24,10 +24,15 @@ env/
 logs/
 *.log
 
-# ML model artifacts (large binaries)
+# ML model artifacts (large binaries — re-train on server with scripts/train_models.sh)
 models/*.pkl
 models/*.joblib
 models/*.lgb
+models/autogluon_entry/
+models/autogluon_exit/
+models/autogluon_dip/
+# YOLOv8 weights (87MB — download separately)
+models/*.pt
 
 # IDE
 .vscode/
