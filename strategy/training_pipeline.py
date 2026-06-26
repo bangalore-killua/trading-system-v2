@@ -486,14 +486,21 @@ class AutoGluonPipeline:
         import os
         os.makedirs(path, exist_ok=True)
 
-        # Triple-barrier labels: +1 (win), 0 (neutral/time-bar), -1 (loss)
-        # AutoGluon binary needs exactly 2 classes — drop neutral rows, remap to 0/1
-        df_binary = df[df["label"] != 0].copy()
-        df_binary["label"] = (df_binary["label"] == 1).astype(int)
-        logger.info(
-            "AutoGluon training on %d binary samples (%d neutral rows dropped)",
-            len(df_binary), len(df) - len(df_binary),
-        )
+        # Entry labels are triple-barrier {-1, 0, +1}: drop neutral (0), remap -1→0, +1→1.
+        # Exit labels are already binary {0, 1}: pass through unchanged.
+        if -1 in df["label"].values:
+            df_binary = df[df["label"] != 0].copy()
+            df_binary["label"] = (df_binary["label"] == 1).astype(int)
+            logger.info(
+                "AutoGluon training on %d binary samples (%d neutral rows dropped)",
+                len(df_binary), len(df) - len(df_binary),
+            )
+        else:
+            df_binary = df.copy()
+            logger.info(
+                "AutoGluon training on %d binary samples (labels already binary)",
+                len(df_binary),
+            )
 
         predictor = TabularPredictor(
             label="label",
