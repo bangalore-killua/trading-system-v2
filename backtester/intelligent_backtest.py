@@ -150,7 +150,11 @@ def _load_ohlcv(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
 
     import yfinance as yf
     df = yf.download(symbol, start=start, end=end, progress=False, auto_adjust=True)
-    df.columns = [c.lower() for c in df.columns]
+    # yfinance ≥0.2.18 returns MultiIndex columns ('Close', 'AAPL') for single-ticker downloads
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [c[0].lower() for c in df.columns]
+    else:
+        df.columns = [c.lower() for c in df.columns]
     return df
 
 

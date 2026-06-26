@@ -269,6 +269,10 @@ def _mean_or_none(values: list) -> Optional[float]:
     return round(float(np.mean(values)), 4) if values else None
 
 
+# Single source of truth lives in scorer.py — import from there
+from strategy.scorer import SECTOR_BUCKETS  # noqa: E402
+
+
 # ── v13 AutoGluon Pipeline ─────────────────────────────────────────────────────
 
 class AutoGluonPipeline:
@@ -388,6 +392,10 @@ class AutoGluonPipeline:
             # v13 features: 4h_trend_gate + 1d_regime_slope already in backtester features
             row["days_held"]    = r.get("days_held", 0)
             row["beta"]         = r.get("beta", 1.0)
+            # Sector bucket: lets the model learn sector-specific signal relationships.
+            # Without this, RSI=42 on MRNA and RSI=42 on NVDA look identical to the model.
+            symbol = r.get("symbol", "")
+            row["sector_bucket"] = SECTOR_BUCKETS.get(symbol, "OTHER")
 
             if model_type == "entry":
                 row["label"] = r.get("entry_label", 0)
@@ -437,10 +445,18 @@ class AutoGluonPipeline:
         """TimeSeriesSplit fallback for IC computation (less honest than CPCV)."""
         from sklearn.model_selection import TimeSeriesSplit
         from sklearn.ensemble import GradientBoostingClassifier
+        from sklearn.preprocessing import LabelEncoder
         from scipy.stats import spearmanr
 
         feature_cols = [c for c in df.columns if c != "label"]
-        X = df[feature_cols].values
+        X = df[feature_cols].copy()
+
+        # Encode any string/categorical columns — sklearn requires numeric input
+        for col in X.select_dtypes(include=["object", "category"]).columns:
+            le = LabelEncoder()
+            X[col] = le.fit_transform(X[col].astype(str))
+
+        X = X.values
         y = df["label"].values
 
         tscv = TimeSeriesSplit(n_splits=5)
@@ -470,13 +486,22 @@ class AutoGluonPipeline:
         import os
         os.makedirs(path, exist_ok=True)
 
+        # Triple-barrier labels: +1 (win), 0 (neutral/time-bar), -1 (loss)
+        # AutoGluon binary needs exactly 2 classes — drop neutral rows, remap to 0/1
+        df_binary = df[df["label"] != 0].copy()
+        df_binary["label"] = (df_binary["label"] == 1).astype(int)
+        logger.info(
+            "AutoGluon training on %d binary samples (%d neutral rows dropped)",
+            len(df_binary), len(df) - len(df_binary),
+        )
+
         predictor = TabularPredictor(
             label="label",
             path=path,
             problem_type="binary",
             eval_metric="roc_auc",
         ).fit(
-            train_data=df,
+            train_data=df_binary,
             presets="best_quality",
             time_limit=time_limit,
             verbosity=1,
