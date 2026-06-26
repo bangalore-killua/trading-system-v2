@@ -213,14 +213,22 @@ class ModelUpdater:
         if not to_check:
             return records
 
-        # Batch check — ask Groq once for a list of tickers to exclude
-        symbols_str = ", ".join(list({r["symbol"] for r in to_check})[:30])
-        prompt = f"""These stocks moved unusually but were NOT already classified as repeatable:
-{symbols_str}
+        # Batch check — ask Groq with pct_change + catalyst_type per symbol so it has
+        # enough context to distinguish noise from repeatable moves (Fix 4 from audit).
+        seen: dict = {}
+        for r in to_check[:30]:
+            sym = r["symbol"]
+            if sym not in seen:
+                ct  = r.get("groq_analysis", {}).get("catalyst_type", "unknown")
+                pct = r.get("pct_change", 0)
+                seen[sym] = f"{sym}: {pct:+.1f}% — catalyst={ct}"
+        symbols_with_context = "\n".join(seen.values())
 
-Which of these typically have noise-driven moves (squeezes, meme activity, thin liquidity)
-rather than repeatable fundamental catalysts? Return a JSON list of ticker symbols to EXCLUDE
-from model training. Include only genuine noise; if unsure, leave out (err on the side of inclusion).
+        prompt = f"""These stocks had unusual moves that were NOT classified as repeatable catalysts:
+{symbols_with_context}
+
+Which are likely noise-driven (short squeeze, meme, thin liquidity, random spike)
+rather than a repeatable fundamental catalyst? Exclude only clear noise; if unsure, keep.
 
 Return: {{"exclude": ["SYMBOL1", "SYMBOL2"]}}
 No markdown."""
