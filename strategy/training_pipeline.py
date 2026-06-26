@@ -293,6 +293,7 @@ class AutoGluonPipeline:
 
     ENTRY_MODEL_PATH = "models/autogluon_entry"
     EXIT_MODEL_PATH  = "models/autogluon_exit"
+    DIP_MODEL_PATH   = "models/autogluon_dip"
     SCORECARD_PATH   = "models/scorecard_entry_v1.json"
 
     def __init__(self, symbols: list, years: int = 5):
@@ -367,6 +368,32 @@ class AutoGluonPipeline:
         leaderboard = self._train_autogluon(df, self.EXIT_MODEL_PATH, time_limit)
         return {"model_path": self.EXIT_MODEL_PATH, "leaderboard": leaderboard, "n_samples": len(df)}
 
+    def run_dip_model(self, time_limit: int = 3600) -> dict:
+        """Train dip detection model: P(correct_dip_buy) vs P(caught_falling_knife).
+        Filters backtester records to oversold entries (rsi_14 < 40), labels by alpha > 0.
+        ONLY call after run_entry_model() returns IC > 0.
+        """
+        import json, os
+        if not os.path.exists(self.SCORECARD_PATH):
+            raise RuntimeError("run_entry_model() first — no entry model scorecard found")
+
+        with open(self.SCORECARD_PATH) as f:
+            scorecard = json.load(f)
+        if scorecard.get("ic", 0) <= 0:
+            raise RuntimeError(f"Entry model IC={scorecard['ic']} ≤ 0 — stop. Do not build dip model.")
+
+        logger.info("Building dip model (entry IC=%.4f > 0 — proceeding)", scorecard["ic"])
+        records = self._collect_records()
+        df = self._records_to_features(records, model_type="dip")
+
+        if len(df) < 100:
+            logger.warning("Dip model: only %d samples after RSI filter — need ≥100", len(df))
+            return {"error": "insufficient_data", "n_samples": len(df)}
+
+        logger.info("Dip model: %d samples (rsi_14 < 40 at entry)", len(df))
+        leaderboard = self._train_autogluon(df, self.DIP_MODEL_PATH, time_limit)
+        return {"model_path": self.DIP_MODEL_PATH, "leaderboard": leaderboard, "n_samples": len(df)}
+
     def _collect_records(self) -> list:
         """Run intelligent backtester for all symbols and return combined records."""
         from backtester.intelligent_backtest import run_backtest
@@ -399,6 +426,10 @@ class AutoGluonPipeline:
 
             if model_type == "entry":
                 row["label"] = r.get("entry_label", 0)
+            elif model_type == "dip":
+                # Dip: 1 = correct_dip_buy (recovered, alpha > 0), 0 = caught_falling_knife
+                alpha = r.get("alpha", 0)
+                row["label"] = int(alpha > 0)
             else:
                 # Exit: 1 if alpha > 0 (correct hold) else 0 (should have exited)
                 alpha = r.get("alpha", 0)
@@ -407,6 +438,13 @@ class AutoGluonPipeline:
             rows.append(row)
 
         df = pd.DataFrame(rows).dropna(subset=["label"])
+
+        # Dip model: filter to oversold entries only (rsi_14 < 40)
+        if model_type == "dip" and "rsi_14" in df.columns:
+            before = len(df)
+            df = df[df["rsi_14"] < 40].copy()
+            logger.info("Dip filter: %d → %d records (rsi_14 < 40)", before, len(df))
+
         return df
 
     def _validate_with_cpcv(self, df: pd.DataFrame) -> float:
@@ -597,6 +635,7 @@ if __name__ == "__main__":
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument("--autogluon",     action="store_true", help="Use AutoGluon + mlfinlab CPCV")
     parser.add_argument("--exit-model",    action="store_true", help="Build exit model (requires entry IC > 0)")
+    parser.add_argument("--dip-model",     action="store_true", help="Build dip model (requires entry IC > 0)")
     parser.add_argument("--dry-run",       action="store_true", help="Smoke test: print config and exit")
     args = parser.parse_args()
 
@@ -612,6 +651,8 @@ if __name__ == "__main__":
             result = run_bootstrap(dry=True)
         elif args.exit_model:
             result = pipe.run_exit_model()
+        elif args.dip_model:
+            result = pipe.run_dip_model()
         else:
             result = pipe.run_entry_model()
         print(f"\nResult: IC={result.get('ic', 'N/A')} | n_samples={result.get('n_samples', 'N/A')}")
