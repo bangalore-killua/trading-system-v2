@@ -4,10 +4,24 @@
     "screener_picks": [],
     "manual_additions": [],
     "mandatory": [
-      "SPY", "QQQ", "GLD",
-      "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA",
-      "AMD", "CRM", "NFLX", "JPM", "UBER"
-    ]
+      "AAPL", "MSFT", "GOOGL", "META", "AMZN", "TSLA",
+      "NVDA", "AMD", "QCOM", "AVGO", "INTC", "TSM", "MRVL", "ASML", "ARM", "SMCI",
+      "CRM", "NFLX", "SNOW", "PLTR", "ORCL",
+      "CRWD", "PANW",
+      "V", "PYPL", "COIN", "HOOD",
+      "JPM", "GS", "BAC", "WFC", "MS",
+      "LLY", "UNH", "JNJ", "PFE", "ABBV", "NVO",
+      "GILD", "MRNA", "BIIB", "REGN", "VRTX",
+      "XOM", "CVX", "COP", "SLB", "ENPH", "OXY",
+      "NKE", "MCD", "HD", "SBUX", "UBER", "COST",
+      "PG", "KO", "WMT",
+      "CAT", "HON", "DE", "GE",
+      "LMT", "RTX", "NOC",
+      "FCX", "NEM", "MSTR",
+      "NEE",
+      "AMT"
+    ],
+    "macro_reference": ["SPY", "QQQ", "GLD"]
   },
   "universe": {
     "hot_universe_ttl_hours": {

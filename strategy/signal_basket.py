@@ -279,3 +279,27 @@ def check_hard_exit(data: dict) -> Optional[str]:
         if data.get(condition, False):
             return condition
     return None
+
+
+# ── Class interface for run_server.py / PositionManager ──────────────────────
+
+class SignalBasket:
+    """Class wrapper around module-level basket functions for PositionManager."""
+
+    def __init__(self, cfg: dict = None):
+        self._cfg = cfg or {}
+
+    def detect_primary_setup(self, symbol: str, indicators: dict) -> Optional[str]:
+        data = {"symbol": symbol, **indicators}
+        result = detect_primary_setup(data)
+        return result if result != "NONE" else None
+
+    def compute_entry_basket(self, symbol: str, setup_type: str, indicators: dict):
+        data = {"symbol": symbol, **indicators}
+        r = compute_entry_basket(data, setup_type)
+        return r["basket_score"], r["signals_hit"]
+
+    def compute_exit_basket(self, symbol: str, setup_type: str, indicators: dict):
+        data = {"symbol": symbol, **indicators}
+        r = compute_exit_basket(data, setup_type)
+        return r["basket_score"], r["signals_hit"]

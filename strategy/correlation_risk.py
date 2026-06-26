@@ -121,3 +121,43 @@ def get_size_penalty(existing_count: int) -> float:
     max_key   = max(int(k) for k in penalties)
     key       = str(min(existing_count, max_key))
     return float(penalties.get(key, 1.0))
+
+
+# ── Class interface for run_server.py / PositionManager ──────────────────────
+
+class CorrelationRisk:
+    """Class wrapper for PositionManager dependency injection."""
+
+    def __init__(self, cfg: dict = None):
+        self._cfg = cfg or {}
+        self._trade_state = None  # injected after init if available
+
+    def set_trade_state(self, trade_state) -> None:
+        self._trade_state = trade_state
+
+    def check_sector_concentration(self, symbol: str):
+        """Returns (allowed: bool, reason: str)."""
+        open_positions = {}
+        if self._trade_state is not None:
+            try:
+                open_positions = {s: None for s in self._trade_state.get_all_positions()}
+            except Exception:
+                pass
+        result = get_sector_concentration(symbol, open_positions)
+        if result["entry_blocked"]:
+            return False, f"sector_limit:{result['sector']}({result['existing_count']})"
+        return True, "ok"
+
+    def check_correlation(self, symbol: str):
+        """Returns (allowed: bool, reason: str). Checks size penalty as proxy."""
+        open_positions = {}
+        if self._trade_state is not None:
+            try:
+                open_positions = {s: None for s in self._trade_state.get_all_positions()}
+            except Exception:
+                pass
+        result = get_sector_concentration(symbol, open_positions)
+        penalty = get_size_penalty(result["existing_count"])
+        if penalty < 0.5:
+            return False, f"high_correlation_penalty:{penalty}"
+        return True, "ok"

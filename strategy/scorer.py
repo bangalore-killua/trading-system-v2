@@ -30,9 +30,30 @@ Feature vector dimensions:
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _load_dynamic_sector_cache() -> dict:
+    """Load sector_buckets for dynamically profiled symbols from disk.
+    Returns {} silently on any error — static SECTOR_BUCKETS always covers known symbols.
+    """
+    try:
+        p = Path("data/symbol_profiles.json")
+        if p.exists():
+            with open(p) as f:
+                profiles = json.load(f)
+            return {sym: v["sector_bucket"] for sym, v in profiles.items() if "sector_bucket" in v}
+    except Exception:
+        pass
+    return {}
+
+
+# Merged at import time: static known symbols + any previously profiled new symbols.
+# Re-merged each time scorer.py is imported (i.e. once per process startup).
+_DYNAMIC_SECTOR_CACHE: dict = _load_dynamic_sector_cache()
 
 # Encode categorical fields to integers for LightGBM
 REGIME_ENCODING = {
@@ -50,10 +71,40 @@ FEAR_GREED_ENCODING = {
 }
 MKTCAP_ENCODING = {"nano": 0, "micro": 1, "small": 2, "mid": 3, "large": 4, "mega": 5}
 
-SECTOR_ENCODING = {
-    "Technology": 0, "Healthcare": 1, "Financials": 2, "Consumer Discretionary": 3,
-    "Industrials": 4, "Communication Services": 5, "Consumer Staples": 6,
-    "Energy": 7, "Materials": 8, "Real Estate": 9, "Utilities": 10, "Unknown": 11,
+# Behavioural sector buckets — finer-grained than GICS standard sectors.
+# Key splits that matter for signal IC:
+#   SEMICONDUCTOR ≠ TECH_GROWTH  (GPU momentum vs SaaS subscription cycles)
+#   BIOTECH ≠ HEALTHCARE          (FDA event spikes vs steady pharma earnings)
+#   DEFENSE ≠ CYCLICAL            (congressional trade IC is unique to defense)
+#   CRYPTO_PROXY ≠ FINTECH        (BTC correlation vs payment volume cycles)
+# AutoGluon reads these as native categoricals — no integer mapping needed.
+SECTOR_BUCKETS: dict = {
+    "AAPL": "TECH_GROWTH",  "MSFT": "TECH_GROWTH",  "GOOGL": "TECH_GROWTH",
+    "META": "TECH_GROWTH",  "AMZN": "TECH_GROWTH",  "TSLA": "TECH_GROWTH",
+    "CRM":  "TECH_GROWTH",  "NFLX": "TECH_GROWTH",  "SNOW": "TECH_GROWTH",
+    "PLTR": "TECH_GROWTH",  "ORCL": "TECH_GROWTH",
+    "CRWD": "TECH_GROWTH",  "PANW": "TECH_GROWTH",
+    "NVDA": "SEMICONDUCTOR", "AMD":  "SEMICONDUCTOR", "QCOM": "SEMICONDUCTOR",
+    "AVGO": "SEMICONDUCTOR", "INTC": "SEMICONDUCTOR", "TSM":  "SEMICONDUCTOR",
+    "MRVL": "SEMICONDUCTOR", "ASML": "SEMICONDUCTOR", "ARM":  "SEMICONDUCTOR",
+    "SMCI": "SEMICONDUCTOR",
+    "V":    "FINTECH",   "PYPL": "FINTECH",  "HOOD": "FINTECH",
+    "COIN": "CRYPTO_PROXY",  "MSTR": "CRYPTO_PROXY",
+    "JPM": "FINANCIALS", "GS":  "FINANCIALS", "BAC": "FINANCIALS",
+    "WFC": "FINANCIALS", "MS":  "FINANCIALS",
+    "LLY": "HEALTHCARE", "UNH": "HEALTHCARE", "JNJ": "HEALTHCARE",
+    "PFE": "HEALTHCARE", "ABBV": "HEALTHCARE", "NVO": "HEALTHCARE",
+    "GILD": "BIOTECH", "MRNA": "BIOTECH", "BIIB": "BIOTECH",
+    "REGN": "BIOTECH",  "VRTX": "BIOTECH",
+    "XOM": "ENERGY", "CVX": "ENERGY", "COP": "ENERGY",
+    "SLB": "ENERGY", "ENPH": "ENERGY", "OXY": "ENERGY",
+    "NKE": "CONSUMER_DISC", "MCD": "CONSUMER_DISC", "HD":   "CONSUMER_DISC",
+    "SBUX": "CONSUMER_DISC", "UBER": "CONSUMER_DISC", "COST": "CONSUMER_DISC",
+    "PG": "DEFENSIVE", "KO": "DEFENSIVE", "WMT": "DEFENSIVE",
+    "NEE": "DEFENSIVE", "AMT": "DEFENSIVE",
+    "CAT": "CYCLICAL", "HON": "CYCLICAL", "DE": "CYCLICAL", "GE": "CYCLICAL",
+    "LMT": "DEFENSE", "RTX": "DEFENSE", "NOC": "DEFENSE",
+    "FCX": "COMMODITY", "NEM": "COMMODITY",
 }
 
 
@@ -159,14 +210,14 @@ class FeatureVector:
         self,
         regime: str = "NEUTRAL",
         setup_type: str = "SETUP_MOMENTUM",
-        sector: str = "Unknown",
+        sector_bucket: str = "OTHER",
         mktcap_bucket: str = "mid",
         days_since_earnings: Optional[int] = None,
     ) -> "FeatureVector":
-        """Add categorical context features (encoded as integers for LightGBM)."""
+        """Add categorical context features."""
         self._data["regime_encoded"] = REGIME_ENCODING.get(regime, 4)
         self._data["setup_type_encoded"] = SETUP_TYPE_ENCODING.get(setup_type, 0)
-        self._data["sector_encoded"] = SECTOR_ENCODING.get(sector, 11)
+        self._data["sector_bucket"] = sector_bucket  # string — AutoGluon handles natively
         self._data["mktcap_bucket_encoded"] = MKTCAP_ENCODING.get(mktcap_bucket, 3)
         self._data["days_since_earnings"] = days_since_earnings
         return self
@@ -273,10 +324,23 @@ class Scorer:
         if fundamentals:
             mktcap = fundamentals.get("mktcap_bucket", "mid")
 
+        # Resolve sector: static dict first, then dynamic profile cache, then "OTHER"
+        sector_bucket = SECTOR_BUCKETS.get(symbol) or _DYNAMIC_SECTOR_CACHE.get(symbol)
+        if sector_bucket is None:
+            # New symbol not seen before — trigger background profiling, use OTHER now
+            sector_bucket = "OTHER"
+            try:
+                import threading
+                from data.sources.symbol_profiler import classify_symbol
+                threading.Thread(target=classify_symbol, args=(symbol,), daemon=True).start()
+                logger.info("Triggered background profiling for unknown symbol: %s", symbol)
+            except Exception:
+                pass
+
         fv.add_context(
             regime=regime,
             setup_type=setup_type,
-            sector=sector,
+            sector_bucket=sector_bucket,
             mktcap_bucket=mktcap,
         )
 

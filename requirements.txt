@@ -116,6 +116,17 @@ sentence-transformers>=2.7.0       # Cross-article correlation (CPU-fast, 80MB m
 # spaCy already listed above (transformers section) — en_core_web_sm model required:
 # python -m spacy download en_core_web_sm
 
+# ── Phase 3: AutoML Training ──────────────────────────────────────────────────
+# autogluon — do NOT pin to exact version; tabular extras pull in xgboost/lightgbm
+# Install: pip install "autogluon.tabular[lightgbm,xgboost]"
+# (too large for git-tracked installs — install separately on server)
+# autogluon.tabular[lightgbm,xgboost]
+
+# ray — required for AutoGluon best_quality preset (HPO + parallel fold fitting)
+# Without ray, best_quality deadlocks near-silently (CPU~0%, RAM 4MB)
+# Pinned range: ray<2.53.0 avoids a grpc/protobuf ABI conflict with autogluon 1.5.x
+"ray>=2.43.0,<2.53.0"
+
 # ── Phase 4–5: LLM + Feedback Loop ───────────────────────────────────────────
 groq>=0.4.0                        # Groq API client (Llama 3.3 70B, free tier)
 agno>=1.0.0                        # Fincept agent framework (agno.models.groq)

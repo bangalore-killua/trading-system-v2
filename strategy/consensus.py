@@ -63,9 +63,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL   = "llama-3.3-70b-versatile"
-HAIKU_MODEL  = "claude-haiku-4-5-20251001"
-SONNET_MODEL = "claude-sonnet-4-6"
+GROQ_MODEL   = "llama-3.3-70b-versatile"   # free — all verdicts + routine tasks
+SONNET_MODEL = "claude-sonnet-4-6"          # final synthesis only (~$2/mo)
 
 CONFLICT_LOG_PATH = Path("logs/consensus_conflicts.jsonl")
 
@@ -212,7 +211,7 @@ class ConsensusEngine:
     # ── v13: Exit / Dip / Tranche verdicts ───────────────────────────────────
 
     async def exit_verdict(self, symbol: str, position_data: dict) -> dict:
-        """Claude Haiku — decide whether to exit an open position.
+        """Groq — decide whether to exit an open position.
 
         Parameters
         ----------
@@ -224,16 +223,44 @@ class ConsensusEngine:
         {"action": "hold|sell_partial|sell_all", "urgency": "immediate|next_open|no_rush",
          "reasoning": str}
         """
-        from data.fincept.agents.research_agent import ResearchAgent  # type: ignore
-        agent = ResearchAgent()
-        result = await __import__("asyncio").get_event_loop().run_in_executor(
-            None, lambda: agent.exit_verdict(symbol, position_data)
+        client = self._get_groq_client()
+        if client is None:
+            return {"action": "hold", "urgency": "no_rush", "reasoning": "Groq unavailable"}
+
+        # Enrich prompt with symbol profile context if available
+        profile_context = self._get_symbol_context(symbol)
+        prompt = (
+            f"Symbol: {symbol}{profile_context}\n"
+            f"Position: {json.dumps(position_data, default=str)}\n\n"
+            f"Should we exit this position? Consider unrealized P&L, days held, "
+            f"regime, peak drawdown, entry composite score, and any news since entry.\n"
+            f'Reply JSON only: {{"action": "hold|sell_partial|sell_all", '
+            f'"urgency": "immediate|next_open|no_rush", "reasoning": "one sentence"}}'
         )
-        logger.info("exit_verdict %s: %s", symbol, result.get("action"))
-        return result
+        try:
+            import asyncio
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[
+                        {"role": "system", "content": "You are a position exit advisor. Reply JSON only."},
+                        {"role": "user",   "content": prompt},
+                    ],
+                    temperature=0.0,
+                    max_tokens=150,
+                ),
+            )
+            raw = response.choices[0].message.content.strip().lstrip("```json").lstrip("```").rstrip("```")
+            result = json.loads(raw)
+            logger.info("exit_verdict %s: %s", symbol, result.get("action"))
+            return result
+        except Exception as e:
+            logger.debug("exit_verdict Groq call failed: %s", e)
+            return {"action": "hold", "urgency": "no_rush", "reasoning": "unavailable"}
 
     async def dip_verdict(self, symbol: str, dip_data: dict) -> dict:
-        """Claude Haiku — evaluate whether a price dip is a buy opportunity.
+        """Groq — evaluate whether a price dip is a buying opportunity.
 
         Parameters
         ----------
@@ -245,13 +272,40 @@ class ConsensusEngine:
         {"verdict": "buy_dip|accumulate|avoid", "conviction": "high|medium|low",
          "reasoning": str}
         """
-        from data.fincept.agents.research_agent import ResearchAgent  # type: ignore
-        agent = ResearchAgent()
-        result = await __import__("asyncio").get_event_loop().run_in_executor(
-            None, lambda: agent.dip_verdict(symbol, dip_data)
+        client = self._get_groq_client()
+        if client is None:
+            return {"verdict": "avoid", "conviction": "low", "reasoning": "Groq unavailable"}
+
+        profile_context = self._get_symbol_context(symbol)
+        prompt = (
+            f"Symbol: {symbol}{profile_context}\n"
+            f"Dip data: {json.dumps(dip_data, default=str)}\n\n"
+            f"Is this dip a buying opportunity or a falling knife? Consider drop magnitude, "
+            f"speed, cause, regime, quality score, insider activity, and earnings streak.\n"
+            f'Reply JSON only: {{"verdict": "buy_dip|accumulate|avoid", '
+            f'"conviction": "high|medium|low", "reasoning": "one sentence"}}'
         )
-        logger.info("dip_verdict %s: %s (%s)", symbol, result.get("verdict"), result.get("conviction"))
-        return result
+        try:
+            import asyncio
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[
+                        {"role": "system", "content": "You are a dip-buying advisor. Reply JSON only."},
+                        {"role": "user",   "content": prompt},
+                    ],
+                    temperature=0.0,
+                    max_tokens=150,
+                ),
+            )
+            raw = response.choices[0].message.content.strip().lstrip("```json").lstrip("```").rstrip("```")
+            result = json.loads(raw)
+            logger.info("dip_verdict %s: %s (%s)", symbol, result.get("verdict"), result.get("conviction"))
+            return result
+        except Exception as e:
+            logger.debug("dip_verdict Groq call failed: %s", e)
+            return {"verdict": "avoid", "conviction": "low", "reasoning": "unavailable"}
 
     async def tranche_verdict(self, symbol: str, position_data: dict) -> dict:
         """Groq (routine, free) — decide tranche add/hold/reduce.
@@ -396,6 +450,26 @@ class ConsensusEngine:
         except Exception as e:
             logger.debug("RAG fetch failed: %s", e)
             return "  (RAG unavailable)"
+
+    def _get_symbol_context(self, symbol: str) -> str:
+        """Return a short context string from symbol_profiler for use in Groq prompts."""
+        try:
+            from data.sources.symbol_profiler import load_profile_cache
+            profile = load_profile_cache().get(symbol)
+            if not profile:
+                return ""
+            parts = []
+            if profile.get("sector_bucket"):
+                parts.append(f"sector={profile['sector_bucket']}")
+            if profile.get("beta"):
+                parts.append(f"beta={profile['beta']}")
+            if profile.get("market_cap_tier"):
+                parts.append(f"cap={profile['market_cap_tier']}")
+            if profile.get("business_summary"):
+                parts.append(f"business={profile['business_summary'][:150]}")
+            return f" ({', '.join(parts)})" if parts else ""
+        except Exception:
+            return ""
 
     def _get_groq_client(self):
         if self._groq_client is not None:

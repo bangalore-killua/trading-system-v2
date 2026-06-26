@@ -176,3 +176,33 @@ def check_position_aging(symbol: str,
         f"partial={partial_action is not None}"
     )
     return result
+
+
+# ── Class interface for run_server.py / PositionManager ──────────────────────
+
+class PositionAging:
+    """Class wrapper for PositionManager dependency injection."""
+
+    def __init__(self, cfg: dict = None):
+        self._cfg = cfg or {}
+
+    def check_position_aging(self, symbol: str, pos_info, indicators: dict = None):
+        """Returns (should_partial: bool, partial_pct: float)."""
+        indicators = indicators or {}
+        tier        = getattr(pos_info, "tier", None) or indicators.get("tier", "TIER_1")
+        thesis      = getattr(pos_info, "entry_thesis", None) or indicators.get("entry_thesis", "")
+        pnl_pct     = getattr(pos_info, "pnl_pct", None) or indicators.get("pnl_pct", 0.0)
+        setup_type  = getattr(pos_info, "setup_type", None) or indicators.get("setup_type", "SETUP_MOMENTUM")
+
+        result = check_position_aging(
+            symbol=symbol,
+            position=pos_info,
+            tier=tier,
+            entry_thesis=thesis,
+            pnl_pct=float(pnl_pct),
+            setup_type=setup_type,
+        )
+        action = result.get("partial_profit_action")
+        if action and action.get("action") == "partial_sell":
+            return True, float(action.get("sell_pct", 50))
+        return False, 0.0

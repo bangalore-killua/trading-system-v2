@@ -878,3 +878,6 @@ if __name__ == "__main__":
 
     print(Fore.GREEN + Style.BRIGHT +
           "\n  TradeStateManager working!\n")
+
+# ── Alias for run_server.py compatibility ─────────────────────────────────────
+TradeState = TradeStateManager
