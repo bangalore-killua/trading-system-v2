@@ -59,6 +59,13 @@ _ET = pytz.timezone("America/New_York")
 
 # ── Data helpers ──────────────────────────────────────────────────────────────
 
+def _scalar(val) -> float:
+    """Extract a Python float from a pandas scalar, Series, or numpy value."""
+    if hasattr(val, 'item'):
+        return float(val.item())
+    return float(val)
+
+
 def _fetch_close(ticker: str, period: str = "1y") -> Optional[object]:
     """Returns a pandas Series of close prices or None on failure."""
     try:
@@ -80,8 +87,8 @@ def _get_spy_pct_above_200ma() -> float:
         closes = _fetch_close("SPY", period="1y")
         if closes is None or len(closes) < 200:
             return 0.0
-        close  = float(closes.iloc[-1])
-        sma200 = float(closes.rolling(200).mean().iloc[-1])
+        close  = _scalar(closes.iloc[-1])
+        sma200 = _scalar(closes.rolling(200).mean().iloc[-1])
         return round((close - sma200) / sma200 * 100, 2)
     except Exception:
         return 0.0
@@ -93,7 +100,7 @@ def _get_vix_current() -> float:
         closes = _fetch_close("^VIX", period="3mo")
         if closes is None or closes.empty:
             return 20.0
-        return float(closes.iloc[-1])
+        return _scalar(closes.iloc[-1])
     except Exception:
         return 20.0
 
@@ -104,8 +111,8 @@ def _get_vix_10d_trend() -> str:
         closes = _fetch_close("^VIX", period="3mo")
         if closes is None or len(closes) < 11:
             return "stable"
-        current = float(closes.iloc[-1])
-        ten_ago = float(closes.iloc[-11])
+        current = _scalar(closes.iloc[-1])
+        ten_ago = _scalar(closes.iloc[-11])
         change  = (current - ten_ago) / max(ten_ago, 0.01) * 100
         if change >  10:
             return "rising"
@@ -292,3 +299,36 @@ def get_time_of_day_modifier(symbol: str,
                     "entry_allowed": mod > 0.0}
 
     return {"modifier": 0.00, "session": "CLOSED", "entry_allowed": False}
+
+
+# ── RegimeDetector class (wraps standalone functions for run_server.py) ────────
+
+class _RegimeState:
+    """Thin wrapper so callers can do regime.name and str(regime)."""
+    def __init__(self, data: dict):
+        self._data = data
+        self.name  = data.get("state", "UNKNOWN")
+
+    def __str__(self) -> str:
+        return self.name
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+
+class RegimeDetector:
+    """Class interface around detect_regime() for run_server.py and api.py."""
+
+    def __init__(self, cfg: dict = None):
+        self._cfg = cfg or {}
+
+    def get_current_regime(self, force_refresh: bool = False) -> _RegimeState:
+        data = detect_regime(force_refresh=force_refresh)
+        return _RegimeState(data)
+
+    def detect(self, force_refresh: bool = False) -> _RegimeState:
+        """Alias for get_current_regime() — used by scheduler."""
+        return self.get_current_regime(force_refresh=force_refresh)
+
+    def invalidate_cache(self) -> None:
+        invalidate_regime_cache()

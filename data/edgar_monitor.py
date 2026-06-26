@@ -97,7 +97,10 @@ class EdgarMonitor:
         """Download SEC's official CIK→ticker JSON (~300KB, weekly refresh)."""
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(COMPANY_TICKERS_URL)
+                resp = await client.get(
+                    COMPANY_TICKERS_URL,
+                    headers={"User-Agent": "trading-system-v2 bangalore.killua@gmail.com"},
+                )
                 data = resp.json()
 
             # Data format: {"0": {"cik_str": 320193, "ticker": "AAPL", ...}, ...}

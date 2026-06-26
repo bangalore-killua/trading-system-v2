@@ -415,3 +415,24 @@ def close_trade(trade_id: str,
         f"Trade closed: {trade_id} @ ${exit_price:.2f} "
         f"P&L={return_pct:+.1f}% [{exit_reason}]"
     )
+
+
+# ── Class interface for run_server.py / PositionManager ──────────────────────
+
+class TradeLedger:
+    """Class wrapper around module-level trade_ledger functions."""
+
+    def __init__(self, cfg: dict = None):
+        self._cfg = cfg or {}
+
+    def log_entry(self, symbol: str, qty=None, price=None, **kwargs):
+        try:
+            open_trade(symbol=symbol, qty=qty, price=price, **kwargs)
+        except Exception as e:
+            log.warning("TradeLedger.log_entry failed for %s: %s", symbol, e)
+
+    def log_exit(self, symbol: str, qty=None, price=None, **kwargs):
+        try:
+            close_trade(symbol=symbol, exit_price=price or 0, **kwargs)
+        except Exception as e:
+            log.warning("TradeLedger.log_exit failed for %s: %s", symbol, e)

@@ -298,7 +298,7 @@ class TradeLedger(Base):
     __tablename__ = "trade_ledger"
 
     trade_id              = Column(String(60),  primary_key=True)
-    symbol                = Column(String(20),  nullable=False, index=True)
+    symbol                = Column(String(20),  nullable=False)
     entry_date            = Column(DateTime,    nullable=False)
     entry_price           = Column(Float,       nullable=False)
     shares                = Column(Float,       nullable=True)
@@ -429,12 +429,24 @@ class OptionPosition(Base):
 # ── Database Connection ───────────────────────────────────────
 
 def get_connection_string() -> str:
-    """Builds PostgreSQL connection string from .env."""
-    host     = os.getenv("DB_HOST",     "localhost")
+    """Builds connection string from .env. Falls back to SQLite for local dev."""
+    db_host = os.getenv("DB_HOST", "")
+    db_pass = os.getenv("DB_PASSWORD", "")
+
+    # Use SQLite when no PostgreSQL credentials configured (local dev / CI)
+    if not db_host and not db_pass:
+        sqlite_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "data", "trading_local.db"
+        )
+        os.makedirs(os.path.dirname(sqlite_path), exist_ok=True)
+        log.info("No DB_HOST configured — using SQLite fallback: %s", sqlite_path)
+        return f"sqlite:///{sqlite_path}"
+
+    host     = db_host or "localhost"
     port     = os.getenv("DB_PORT",     "5432")
     dbname   = os.getenv("DB_NAME",     "trading_system")
     user     = os.getenv("DB_USER",     "killua_trading")
-    password = quote_plus(os.getenv("DB_PASSWORD", ""))
+    password = quote_plus(db_pass)
     return (
         f"postgresql://{user}:{password}"
         f"@{host}:{port}/{dbname}"
@@ -453,13 +465,17 @@ def init_db() -> None:
     global _engine, _SessionLocal
 
     conn_str   = get_connection_string()
-    _engine    = create_engine(
-        conn_str,
-        pool_size       = 5,
-        max_overflow    = 10,
-        pool_pre_ping   = True,   # verify connection before use
-        pool_recycle    = 3600,   # recycle connections hourly
-    )
+    is_sqlite  = conn_str.startswith("sqlite")
+    if is_sqlite:
+        _engine = create_engine(conn_str, connect_args={"check_same_thread": False})
+    else:
+        _engine = create_engine(
+            conn_str,
+            pool_size       = 5,
+            max_overflow    = 10,
+            pool_pre_ping   = True,
+            pool_recycle    = 3600,
+        )
 
     # create all tables if they don't exist
     Base.metadata.create_all(_engine)
