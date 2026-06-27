@@ -213,7 +213,7 @@
     }
   },
   "options": {
-    "enabled": false,
+    "enabled": true,
     "strategies_enabled": ["long_call", "protective_put"],
     "max_options_exposure_pct": 10,
     "monitor_interval_minutes": 15,

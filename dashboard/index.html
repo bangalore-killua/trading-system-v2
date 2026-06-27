@@ -189,6 +189,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .hc-err{color:#ef4444}
 .hc-sub{font-size:10px;color:#475569;margin-top:3px}
 
+/* ── Chart panel ── */
+.chart-wrap{position:relative;height:340px;width:100%;border-radius:6px;overflow:hidden}
+.chart-bar{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.chart-sym-inp{background:#0f1117;border:1px solid #1e2433;border-radius:6px;padding:5px 10px;color:#fff;font-size:13px;outline:none;width:90px}
+.chart-sym-inp::placeholder{color:#475569}
+.period-btn{padding:3px 10px;border-radius:20px;border:1px solid #1e2433;background:transparent;color:#64748b;font-size:11px;cursor:pointer;transition:all .15s}
+.period-btn.active,.period-btn:hover{background:#1e3a5f;border-color:#3b82f6;color:#93c5fd}
+.chart-legend{font-size:11px;color:#64748b;margin-top:6px;min-height:16px;font-family:'SF Mono',Menlo,monospace}
+.chart-no-js{display:flex;align-items:center;justify-content:center;height:340px;color:#475569;font-size:13px}
+
 /* ── Misc ── */
 .empty{font-size:12px;color:#475569;padding:8px 0}
 .loading{font-size:12px;color:#475569;padding:8px 0}
@@ -218,6 +228,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .eco-impact-low{color:#475569;font-size:10px}
 .eco-time{font-size:10px;color:#64748b}
 </style>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 
@@ -291,6 +302,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <span class="regime-label">Cash Gate</span>
     <span class="regime-val" id="rb-cash-gate">—</span>
   </div>
+</div>
+
+<!-- ── Price chart ──────────────────────────────────────── -->
+<div class="panel section-gap" id="chart-panel">
+  <div class="panel-title">
+    Price chart
+    <div class="chart-bar" style="margin:0">
+      <input class="chart-sym-inp" id="chart-sym-inp" placeholder="Symbol…"
+             onkeydown="if(event.key==='Enter'){loadChart(this.value.trim().toUpperCase());this.blur()}">
+      <button class="period-btn active" onclick="setChartPeriod('1mo',this)">1M</button>
+      <button class="period-btn" onclick="setChartPeriod('3mo',this)">3M</button>
+      <button class="period-btn" onclick="setChartPeriod('6mo',this)">6M</button>
+      <button class="period-btn" onclick="setChartPeriod('1y',this)">1Y</button>
+      <button class="period-btn" onclick="setChartPeriod('2y',this)">2Y</button>
+    </div>
+  </div>
+  <div class="chart-wrap" id="chart-wrap">
+    <div class="chart-no-js" id="chart-no-lwc">Loading chart library…</div>
+  </div>
+  <div class="chart-legend" id="chart-legend"></div>
 </div>
 
 <!-- ── Signals + Positions ──────────────────────────────── -->
@@ -620,7 +651,7 @@ async function loadSignals() {
       `<span class="pat-chip">${k.replace('chart_','').replace(/_/g,' ')}</span>`
     ).join('');
     return `
-    <div class="sig-row" onclick="toggleScorecard(${i})">
+    <div class="sig-row" onclick="toggleScorecard(${i},'${s.symbol}')">
       <div class="sig-top">
         <div>
           <div class="sig-sym">${s.symbol}</div>
@@ -651,9 +682,10 @@ function buildScorecard(s) {
   return rows.map(([k,v]) => `<div class="sc-row"><span class="sc-key">${k}</span><span class="sc-val">${v}</span></div>`).join('');
 }
 
-function toggleScorecard(i) {
+function toggleScorecard(i, sym) {
   const sc = el(`sc-${i}`);
   if (sc) sc.classList.toggle('open');
+  if (sym) loadChart(sym, _chartPeriod);
 }
 
 // ── Regime ───────────────────────────────────────────────────────
@@ -1006,6 +1038,102 @@ async function toggleKillSwitch() {
   if (r.ok) await loadHealth();
 }
 
+// ── Chart (Lightweight Charts v4) ────────────────────────────────
+let _lwChart     = null;
+let _candleSer   = null;
+let _volSer      = null;
+let _chartSym    = '';
+let _chartPeriod = '3mo';
+
+function initChart() {
+  if (typeof LightweightCharts === 'undefined') {
+    el('chart-no-lwc').textContent = 'Chart library failed to load.';
+    return;
+  }
+  el('chart-no-lwc').style.display = 'none';
+  const wrap = el('chart-wrap');
+  _lwChart = LightweightCharts.createChart(wrap, {
+    width:  wrap.clientWidth,
+    height: 340,
+    layout: { background: { color: '#131722' }, textColor: '#94a3b8' },
+    grid:   { vertLines: { color: '#1e2433' }, horzLines: { color: '#1e2433' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#1e2433', scaleMargins: { top: 0.08, bottom: 0.20 } },
+    timeScale: { borderColor: '#1e2433', timeVisible: false },
+  });
+
+  _candleSer = _lwChart.addCandlestickSeries({
+    upColor: '#22c55e', downColor: '#ef4444',
+    borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+    wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+    priceScaleId: 'right',
+  });
+
+  _volSer = _lwChart.addHistogramSeries({
+    color: '#1e3a5f',
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'vol',
+  });
+  _lwChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+
+  _lwChart.subscribeCrosshairMove(param => {
+    if (!param.time || !_candleSer) return;
+    const bar = param.seriesData.get(_candleSer);
+    if (!bar) return;
+    const chg = _candleSer.data?.length > 1
+      ? ((bar.close - _candleSer.data[0].close) / _candleSer.data[0].close * 100)
+      : 0;
+    el('chart-legend').innerHTML =
+      `<b style="color:#fff">${_chartSym}</b> &nbsp;` +
+      `O <span style="color:#e2e8f0">${bar.open.toFixed(2)}</span> &nbsp;` +
+      `H <span style="color:#22c55e">${bar.high.toFixed(2)}</span> &nbsp;` +
+      `L <span style="color:#ef4444">${bar.low.toFixed(2)}</span> &nbsp;` +
+      `C <span style="color:#e2e8f0">${bar.close.toFixed(2)}</span>`;
+  });
+
+  new ResizeObserver(() => {
+    if (_lwChart) _lwChart.resize(wrap.clientWidth, 340);
+  }).observe(wrap);
+}
+
+async function loadChart(sym, period) {
+  if (!_lwChart || !sym) return;
+  sym    = sym.toUpperCase();
+  period = period || _chartPeriod;
+  _chartSym    = sym;
+  _chartPeriod = period;
+  el('chart-sym-inp').value = sym;
+  el('chart-legend').textContent = `Loading ${sym}…`;
+
+  const d = await apiFetch(`/api/chart/${sym}?period=${period}`);
+  if (!d || d.status !== 'ok' || !d.data?.candles?.length) {
+    el('chart-legend').textContent = `No data for ${sym}`;
+    return;
+  }
+  const candles = d.data.candles;
+  const volData = candles.map(c => ({ time: c.time, value: c.volume,
+    color: c.close >= c.open ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.20)' }));
+
+  _candleSer.setData(candles);
+  _volSer.setData(volData);
+  _lwChart.timeScale().fitContent();
+
+  const first = candles[0], last = candles[candles.length - 1];
+  const chg = ((last.close - first.close) / first.close * 100);
+  const chgCol = chg >= 0 ? '#22c55e' : '#ef4444';
+  el('chart-legend').innerHTML =
+    `<b style="color:#fff">${sym}</b> &nbsp;` +
+    `<span style="color:#e2e8f0">${last.close.toFixed(2)}</span> &nbsp;` +
+    `<span style="color:${chgCol}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}% (${period})</span>`;
+}
+
+function setChartPeriod(period, btn) {
+  _chartPeriod = period;
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (_chartSym) loadChart(_chartSym, period);
+}
+
 // ── Refresh countdown ────────────────────────────────────────────
 function startCountdown() {
   clearInterval(_refreshInterval);
@@ -1033,11 +1161,16 @@ async function refreshAll(manual=false) {
   ]);
   await Promise.all([loadWatchlist(), loadInsider(), loadAnalyst()]);
   loadPerformance();
+  if (!_chartSym) {
+    const firstBuy = _signals.find(s => s.signal_label?.startsWith('BUY'));
+    loadChart(firstBuy ? firstBuy.symbol : 'SPY', _chartPeriod);
+  }
   el('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 
 // ── Boot ─────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  initChart();
   refreshAll(false);
   startCountdown();
 });
