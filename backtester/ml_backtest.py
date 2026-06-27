@@ -358,7 +358,7 @@ class _Portfolio:
 
     def value(self, prices: Dict[str, float]) -> float:
         pos_val = sum(
-            p.shares * prices.get(p.symbol, p.entry_price)
+            p.shares * (prices.get(p.symbol) or p.entry_price)
             for p in self.positions.values()
         )
         return self.cash + pos_val
