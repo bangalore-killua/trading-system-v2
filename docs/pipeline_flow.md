@@ -1,4 +1,4 @@
-# Pipeline Flow (v13)
+# Pipeline Flow (v14)
 
 ## Weekly Universe Rebuild (Sunday)
 
@@ -10,40 +10,68 @@
    c. Momentum:        TradingView screener (>40% 3m return, >$5, >200k vol)
    d. Seeds:           mandatory + manual from config.json
 3. Deduplicate → cap at 600 candidates
-4. Compute 8 factor scores per candidate (all 0–1, async parallel):
-   momentum, quality, technical, valuation, news, options, macro, insider
+4. Compute 10 factor scores per candidate (all 0–1, async parallel):
+   momentum, quality, technical, valuation, news,
+   options (yfinance EOD v14), macro, insider,
+   alternative_score (cong×0.50 + insider×0.35 + dark_pool×0.15 v14),
+   dark_pool_score (FINRA ATS percentile v14)
+   → FACTOR_SCORES logged per symbol with trace_id
 5. Run entry LightGBM P(win) per candidate (batch inference)
 6. rank_candidates() → top 30 by P(win) = new watchlist
 7. Telegram: weekly watchlist digest + any new entries / exits
 ```
 
-## Daily Signal Cycle (market open)
+## Daily Signal Cycle (market open) — v14
 
 ```
-1. For each watchlist stock:
+[5 min cycle — cycle_id generated, DATA_INGEST + NLP_SCORING + UNIVERSE logged]
+  news_aggregator → fetches 39 RSS sources + OpenBB company news (asyncio, concurrency=10)
+  hot_universe.emit_universe_log() → UNIVERSE stage logged
+
+[60 min cycle — per-symbol, parallel]
+  parallel_runner: workers = min(os.cpu_count(), n_symbols)  ← adapts to CX22 or laptop
+
+1. For each watchlist stock (parallel, adaptive_workers threads):
+   trace_id generated at FACTOR_SCORES → flows through all stages
+
    a. Fetch OHLCV from tvdatafeed (1D, 4H native — no resampling)
-   b. Compute ~138 features:
+   b. Compute ~138 features + 10 factor scores:
       - pandas-ta: 130 indicators + 60 CDL patterns
-      - 8 factor scores (screener.compute_factor_scores())
+      - 10 factor scores (screener.compute_factor_scores())
+        * options_score: yfinance option_chain() EOD [v14]
+        * alternative_score: cong×0.50 + insider×0.35 + dark_pool×0.15 [v14]
+        * dark_pool_score: FINRA ATS percentile rank [v14]
       - Algebraic patterns (pattern_detector.detect_all())
-      - 4H EMA50>EMA200 gate feature
-      - 1D regime slope feature
-   c. Compute composite_score = Σ(score_i × IC[score_i][regime])
-   d. Models run in parallel:
-      i.  entry LightGBM.predict() → P(win)
-      ii. exit_monitor.score(position) → P(peak) [only for open positions]
-      iii. dip_detector.score(symbol) → P(recovery) [if dip event detected]
-   e. SignalOrchestrator → candidate_action + confidence
-   f. ConsensusEngine routes to Groq/Haiku/Sonnet by decision type
-   g. Hard constraints check → if all pass: EXEC
+      - 4H EMA50>EMA200 + 1D regime slope
+      → FACTOR_SCORES logged (trace_id, composite, rank, top 3 signals)
+
+   c. signal_orchestrator.evaluate() with trace_id:
+      → SIGNAL logged (IC-weighted composite, consumed cycle_id)
+      → MODELS logged (entry_P, exit_P, dip_P, tranche_P)
+      → CONSTRAINTS logged (PASS: all gates clear | FAIL: gate name + reason)
+      → ENTRY logged (action, size_pct, rsi, vix_scale)
+
+   d. ConsensusEngine routes to Groq (routine) or Sonnet (final gate only)
+   e. If action = "enter_t1": EXEC below
+
 2. position_size = half_kelly × composite × regime_scalar
 3. Tranche logic:
    - No open position: T1 entry if composite ≥ 0.35
    - T1 open: T2 trigger if price > entry + 1.5×ATR + score still ≥ 0.35
    - T1+T2 open: T3 trigger if new high + score ≥ regime_threshold
    - Dip event: dip_score ≥ 0.65 → dip tranche (0.8–1.5× T1)
-4. Alpaca order execution with fill verification
-5. Telegram: trade alert for every execution
+4. Alpaca order execution (SERIAL — portfolio lock):
+   → EXECUTION logged (side, qty, price, filled_price, slippage)
+   → Telegram push: ENTRY T1: NVDA @ $142.50 | composite=0.74 | size=4.2%
+5. After trade closes:
+   → OUTCOME logged (alpha, raw_return, days_held, exit_reason)
+   → FEEDBACK logged (Groq lesson, top_signals, ic_update_queued)
+   → ChromaDB RAG updated with regime-matched lesson
+   → model_updater.py → model_tester.py → 5 gates → deploy or rollback
+
+[Full reconstruction of any trade:]
+   lookup_trace(trace_id) → all 8 stage entries, complete why narrative
+   /trace B7E2M4K9 in Telegram → same output, no SSH needed
 ```
 
 ## Continuous News Pipeline (always-on)

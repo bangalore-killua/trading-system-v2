@@ -1,23 +1,27 @@
-# Feedback Loop + Model Self-Improvement (v13)
+# Feedback Loop + Model Self-Improvement (v14)
 
 ## Overview
 
-The feedback system closes the learning loop between live/paper trades and model retraining.
+The feedback system closes the learning loop between live/paper trades and model retraining. Every stage is logged to `trade_lifecycle.db` — human-readable `why` fields let the operator audit any decision without SSH.
 
 ```mermaid
 flowchart TD
-    T["Trade closes\n(exit or stop)"]
-    AB["Alpha-beta separation\nalpha = trade_return\n− spy_return × stock_beta\nPrevents learning bull-market bias"]
+    T["Trade closes (exit or stop)"]
+    AB["Alpha-beta separation\nalpha = trade_return − spy_return × stock_beta\nPrevents learning bull-market bias"]
+    OL["OUTCOME logged\nstage='OUTCOME' | result=PASS/FAIL/MISS\nalpha · raw_return · days_held · exit_reason"]
+    FL["FEEDBACK logged\nstage='FEEDBACK' | Groq post-mortem\ntop_signals · ic_update_queued · why narrative"]
     L9["9 label types\ncorrect_peak_exit · early_exit · late_exit\ncorrect_dip_buy · caught_falling_knife · correct_accumulate\ncorrect_hold · correct_scale_up · premature_scale_up"]
-    DB1["ChromaDB feedback_records\nentry cases"]
-    DB2["ChromaDB exit_records\nexit cases"]
-    DB3["ChromaDB dip_records\ndip cases"]
-    RAG["Regime-matched RAG\nwhere regime = current_regime\nSame RSI/MACD in MID_BULL vs LATE_BULL\n→ different expected outcomes"]
-    RETRAIN["Monthly AutoGluon retrain\n4 filters → mlfinlab CPCV\nIC validation → auto-rollback"]
+    DB1["ChromaDB feedback_records entry cases"]
+    DB2["ChromaDB exit_records exit cases"]
+    DB3["ChromaDB dip_records dip cases"]
+    RAG["Regime-matched RAG\nwhere regime = current_regime\nSame RSI/MACD in MID_BULL vs LATE_BULL → different expected outcomes"]
+    MT["model_tester.py · 5 gates\nIC>0 · calibration · Pareto · PSI<0.25 · regime breakdown"]
+    RETRAIN["Monthly AutoGluon retrain\n4 filters → mlfinlab CPCV → model_tester gates → deploy or rollback"]
+    TG["Telegram alert\nrollback notification or 'deployed' confirmation"]
 
-    T --> AB --> L9
+    T --> AB --> OL --> FL --> L9
     L9 --> DB1 & DB2 & DB3
-    DB1 & DB2 & DB3 --> RAG --> RETRAIN
+    DB1 & DB2 & DB3 --> RAG --> RETRAIN --> MT --> TG
 ```
 
 ---

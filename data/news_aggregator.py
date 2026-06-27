@@ -102,6 +102,18 @@ class NewsAggregator:
 
     async def _fetch_all_sources(self) -> None:
         """Fetch RSS sources + OpenBB company news concurrently, run NLP, feed HOT_UNIVERSE."""
+        try:
+            from data.logging.trade_logger import new_cycle, stage as tl_stage, WhyAnalyzer
+            _tl = True
+        except Exception:
+            _tl = False
+
+        cycle_id = None
+        if _tl:
+            cycle_id, _log = new_cycle()
+            _log.why("data ingest cycle starting").emit()
+        self._current_cycle_id = cycle_id
+
         sem = asyncio.Semaphore(10)
 
         async def bounded_fetch(source: NewsSource) -> List[dict]:
@@ -117,12 +129,16 @@ class NewsAggregator:
         rss_results, openbb_articles = await asyncio.gather(rss_task, openbb_task)
 
         new_articles: List[ArticleRecord] = []
+        sources_ok: List[str] = []
+        sources_failed: List[str] = []
 
         # RSS
         for source, entries in zip(self._sources, rss_results):
             if isinstance(entries, Exception):
                 logger.debug("Source %s failed: %s", source.name, entries)
+                sources_failed.append(source.name)
                 continue
+            sources_ok.append(source.name)
             for entry in entries:
                 article = self._parse_entry(entry, source)
                 if article:
@@ -130,6 +146,19 @@ class NewsAggregator:
 
         # OpenBB company news (already ArticleRecord objects)
         new_articles.extend(openbb_articles)
+        if openbb_articles:
+            sources_ok.append("OpenBB")
+
+        # ── DATA_INGEST log ───────────────────────────────────────────────────
+        if _tl and cycle_id:
+            tl_stage(cycle_id, "__CYCLE__", "DATA_INGEST", cycle_id).result(
+                "PASS" if not sources_failed else "WARN"
+            ).signals({
+                "sources_total":  len(self._sources),
+                "sources_ok":     len(sources_ok),
+                "sources_failed": sources_failed,
+                "articles_new":   len(new_articles),
+            }).why(WhyAnalyzer.data_ingest(sources_ok, sources_failed, len(new_articles))).emit()
 
         if not new_articles:
             return
@@ -140,8 +169,35 @@ class NewsAggregator:
             len(openbb_articles),
         )
 
+        pre_nlp_count = len(self._articles)
         await self._process_articles(new_articles)
         self._evict_stale()
+
+        # ── NLP_SCORING log ───────────────────────────────────────────────────
+        if _tl and cycle_id:
+            processed = self._articles[pre_nlp_count:]
+            bullish = [a for a in processed if getattr(a, "sentiment", 0) and a.sentiment > 0.1]
+            bearish = [a for a in processed if getattr(a, "sentiment", 0) and a.sentiment < -0.1]
+            threats = [a for a in processed if getattr(a, "threat", "") in ("CRITICAL", "HIGH")]
+            sym_counts: dict = {}
+            for a in processed:
+                for t in getattr(a, "tickers", []):
+                    sym_counts[t] = sym_counts.get(t, 0) + 1
+            top_syms = sorted(sym_counts.items(), key=lambda x: -x[1])[:6]
+            total = len(processed)
+            tl_stage(cycle_id, "__CYCLE__", "NLP_SCORING", cycle_id).result("PASS").signals({
+                "articles_processed": total,
+                "bullish":  len(bullish),
+                "bearish":  len(bearish),
+                "threats":  len(threats),
+                "symbols_found": len(sym_counts),
+            }).why(WhyAnalyzer.nlp_scoring(
+                total,
+                len(bullish) / max(total, 1),
+                len(bearish) / max(total, 1),
+                len(threats),
+                top_syms,
+            )).emit()
 
     async def _fetch_openbb_company_news(self) -> List[ArticleRecord]:
         """Fetch company-specific news from OpenBB for active + watchlist symbols.

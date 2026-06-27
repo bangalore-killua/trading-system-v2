@@ -260,7 +260,7 @@ class FeedbackCollector:
         # v13 Fix 2: was `{symbol in signal}` (always False bug) → now `{in_watchlist}`
         groq_analysis = await self._groq_analyse_mover(symbol, mover, signal, headlines, in_watchlist)
 
-        return {
+        record = {
             "date":         date.today().isoformat(),
             "symbol":       symbol,
             "pct_change":   pct,
@@ -277,6 +277,38 @@ class FeedbackCollector:
             "groq_analysis": groq_analysis,
             "recorded_at":  datetime.utcnow().isoformat(),
         }
+
+        # ── OUTCOME + FEEDBACK logs ───────────────────────────────────────────
+        try:
+            from data.logging.trade_logger import new_trace, WhyAnalyzer
+            won = alpha > 0 if alpha is not None else False
+            raw_return = pct / 100.0
+            result_label = "PASS" if won else "FAIL" if outcome_type == "false_positive" else "MISS"
+
+            trace_id, olog = new_trace(symbol, "OUTCOME")
+            olog.result(result_label).model({
+                "alpha":          alpha,
+                "raw_return":     raw_return,
+                "outcome_type":   outcome_type,
+                "regime":         regime,
+            }).why(WhyAnalyzer.outcome(
+                alpha or 0.0, raw_return,
+                days_held=1,
+                exit_reason=outcome_type,
+                entry_composite=float(signal.get("normalised_score", 0.5) or 0.5),
+            )).emit()
+
+            groq_lesson = groq_analysis.get("lesson", "") if isinstance(groq_analysis, dict) else str(groq_analysis)[:120]
+            top_signals = [k for k, v in signal.items() if isinstance(v, float) and v > 0.7][:3]
+            tfl_stage_fn = __import__("data.logging.trade_logger", fromlist=["stage"]).stage
+            tfl_stage_fn(trace_id, symbol, "FEEDBACK").result("PASS").model({
+                "won": won, "groq_lesson": groq_lesson[:200],
+                "ic_update_queued": True,
+            }).why(WhyAnalyzer.feedback(won, top_signals, groq_lesson)).emit()
+        except Exception:
+            pass
+
+        return record
 
     async def _groq_analyse_mover(
         self, symbol: str, mover: dict, signal: dict,

@@ -246,12 +246,36 @@ class UniverseScreener:
         tasks = [self._score_single(sym) for sym in symbols]
         results_list = await asyncio.gather(*tasks, return_exceptions=True)
         scores: Dict[str, dict] = {}
+
+        try:
+            from data.logging.trade_logger import new_trace, WhyAnalyzer
+            _tl_available = True
+        except Exception:
+            _tl_available = False
+
+        ranked = []
         for sym, result in zip(symbols, results_list):
             if isinstance(result, Exception):
                 logger.debug("Factor score failed for %s: %s", sym, result)
                 scores[sym] = self._neutral_scores()
             else:
                 scores[sym] = result
+                composite = round(sum(result.values()) / len(result), 3) if result else 0.5
+                ranked.append((sym, composite))
+
+        # Emit one FACTOR_SCORES log per symbol with rank context
+        if _tl_available:
+            ranked.sort(key=lambda x: -x[1])
+            rank_map = {sym: i + 1 for i, (sym, _) in enumerate(ranked)}
+            total = len(ranked)
+            for sym, s in scores.items():
+                composite = round(sum(v for v in s.values() if isinstance(v, float)) / len(s), 3)
+                trace_id, log = new_trace(sym, "FACTOR_SCORES")
+                log.result("PASS").signals(s).why(
+                    WhyAnalyzer.factor_scores(composite, s, rank_map.get(sym, 0), total)
+                ).emit()
+                scores[sym]["_trace_id"] = trace_id
+
         return scores
 
     async def _score_single(self, symbol: str) -> dict:
@@ -314,12 +338,11 @@ class UniverseScreener:
             finbert_raw = news_data.get("finbert_score")
             news_score  = ((finbert_raw + 1) / 2) if finbert_raw is not None else 0.5
 
-            # ── v13: Options score (Unusual Whales call/put ratio) ─────────────
+            # ── v14: Options score — yfinance EOD option_chain (replaces Unusual Whales) ──
             options_score = 0.5
             try:
-                from data.sources.unusual_whales import UnusualWhales, compute_options_score  # type: ignore
-                data, _, _ = UnusualWhales().get(symbol)
-                options_score = compute_options_score(data)
+                from data.sources.options_flow import get_options_score  # type: ignore
+                options_score, _ = get_options_score(symbol)
             except Exception:
                 pass
 
@@ -332,27 +355,44 @@ class UniverseScreener:
             except Exception:
                 pass
 
-            # ── v13: Insider score (Form 4 insider + congressional trades) ────
-            insider_score = 0.5
+            # ── v14: Alternative signal = congressional + Form 4 insider + dark pool ──
+            congressional_score = 0.5
+            insider_form4_score = 0.5
+            dark_pool_score     = 0.5
             try:
                 from data.fincept.congressional_trades import (  # type: ignore
                     get_congressional_trades, compute_congressional_score,
                 )
-                cong_trades   = get_congressional_trades(symbol)
-                insider_score = compute_congressional_score(cong_trades)
+                cong_trades         = get_congressional_trades(symbol)
+                congressional_score = compute_congressional_score(cong_trades)
+            except Exception:
+                pass
+            try:
+                from data.sources.finra_dark_pool import get_dark_pool_score  # type: ignore
+                dark_pool_score, _ = get_dark_pool_score(symbol)
             except Exception:
                 pass
 
+            # Weighted composite: congressional 50%, Form 4 insider 35%, dark pool 15%
+            alternative_score = round(
+                congressional_score * 0.50 +
+                insider_form4_score * 0.35 +
+                dark_pool_score     * 0.15,
+                3,
+            )
+
             # Normalize legacy 0-100 scores to 0-1
             return {
-                "momentum_score":  round(momentum_score / 100, 3),
-                "quality_score":   round(quality_score / 100, 3),
-                "technical_score": round(technical_score / 100, 3),
-                "valuation_score": round(valuation_score / 100, 3),
-                "news_score":      round(news_score, 3),
-                "options_score":   round(options_score, 3),
-                "macro_score":     round(macro_score, 3),
-                "insider_score":   round(insider_score, 3),
+                "momentum_score":    round(momentum_score / 100, 3),
+                "quality_score":     round(quality_score / 100, 3),
+                "technical_score":   round(technical_score / 100, 3),
+                "valuation_score":   round(valuation_score / 100, 3),
+                "news_score":        round(news_score, 3),
+                "options_score":     round(options_score, 3),
+                "macro_score":       round(macro_score, 3),
+                "insider_score":     round(congressional_score, 3),   # kept for backward compat
+                "alternative_score": alternative_score,               # v14: full composite
+                "dark_pool_score":   round(dark_pool_score, 3),
             }
 
         except Exception:
@@ -361,14 +401,16 @@ class UniverseScreener:
 
     def _neutral_scores(self) -> dict:
         return {
-            "momentum_score":  0.5,
-            "quality_score":   0.5,
-            "technical_score": 0.5,
-            "valuation_score": 0.5,
-            "news_score":      0.5,
-            "options_score":   0.5,
-            "macro_score":     0.5,
-            "insider_score":   0.5,
+            "momentum_score":    0.5,
+            "quality_score":     0.5,
+            "technical_score":   0.5,
+            "valuation_score":   0.5,
+            "news_score":        0.5,
+            "options_score":     0.5,
+            "macro_score":       0.5,
+            "insider_score":     0.5,
+            "alternative_score": 0.5,
+            "dark_pool_score":   0.5,
         }
 
     def _get_sector_peers(self, symbol: str) -> List[str]:

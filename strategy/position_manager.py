@@ -218,6 +218,12 @@ class PositionManager:
 
         if not fill.is_filled:
             logger.error("ORDER FAILED: %s — status=%s", symbol, fill.status)
+            try:
+                from data.logging.trade_logger import new_trace
+                trace_id, elog = new_trace(symbol, "EXECUTION")
+                elog.result("FAIL").reason(f"order_status={fill.status}").error(f"fill failed: {fill.status}").emit()
+            except Exception:
+                pass
             return False
 
         # ── Step 7: Record the trade ───────────────────────────────────────
@@ -233,6 +239,21 @@ class PositionManager:
             stop_price=stop_price,
             target_price=target_price,
         )
+
+        # ── EXECUTION log ─────────────────────────────────────────────────
+        try:
+            from data.logging.trade_logger import new_trace, WhyAnalyzer
+            _trace_id, elog = new_trace(symbol, "EXECUTION")
+            elog.result("PASS").signals({
+                "side": "BUY", "qty": int(fill.filled_qty),
+                "limit_price": current_price, "filled_price": fill.filled_avg_price,
+                "setup_type": str(setup_type), "entry_score": entry_score,
+            }).why(WhyAnalyzer.execution(
+                "BUY", int(fill.filled_qty), symbol, current_price,
+                fill.filled_avg_price, 1,
+            )).emit()
+        except Exception:
+            pass
 
         if self._ledger:
             self._ledger.log_entry(
@@ -285,12 +306,14 @@ class PositionManager:
     async def score_watchlist(self) -> None:
         """Score all static watchlist symbols. Called every 60 minutes."""
         from strategy.config_loader import get_watchlist  # type: ignore
+        from data.parallel_runner import adaptive_workers  # type: ignore
 
         watchlist = get_watchlist(self._cfg)
         logger.info("Scoring watchlist: %d symbols", len(watchlist))
 
-        # Process symbols concurrently with a concurrency cap
-        sem = asyncio.Semaphore(5)
+        # Concurrency = CPU count (adapts: CX22=2, laptop=8)
+        workers = adaptive_workers(len(watchlist))
+        sem     = asyncio.Semaphore(workers)
 
         async def bounded_eval(sym: str) -> None:
             async with sem:

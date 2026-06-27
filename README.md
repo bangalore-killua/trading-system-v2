@@ -38,11 +38,11 @@ Key env vars: `ALPACA_API_KEY`, `ALPACA_API_SECRET`, `GROQ_API_KEY` (free), `ANT
 
 ## Architecture Overview
 
-### Full Signal Flow (v13)
+### Full Signal Flow (v14)
 
 ```mermaid
 flowchart TB
-    subgraph INGEST["Data Ingest — Parallel, Always-On"]
+    subgraph INGEST["Data Ingest — Parallel, Always-On · asyncio · cycle_id logged"]
         direction LR
         I1["Alpaca NewsStream\nALL symbols · WebSocket · free"]
         I2["SEC EDGAR RSS\n8-K + Form 4 · 60s poll · free"]
@@ -52,16 +52,16 @@ flowchart TB
         I6["tvdatafeed\nAll TFs native · 1m→1M · free"]
     end
 
-    subgraph ALT["Alternative Data"]
+    subgraph ALT["Alternative Data — all free"]
         direction LR
-        A1["Unusual Whales\noptions flow · call/put ratio"]
+        A1["yfinance option_chain()\nEOD options · call/put ratio · IV skew"]
         A2["FRED API\nyield curve · credit spread · VIX"]
-        A3["Congressional Trades\nSTOCK Act · 6h cache · free"]
-        A4["Google News RSS\ncredibility 0.60 · velocity signal"]
+        A3["Congressional + Insider\nSTOCK Act + Form 4 · 6h cache · free"]
+        A4["FINRA ATS API\ndark pool % of total volume · weekly · free"]
         A5["StockTwits\nretail sentiment · free API"]
     end
 
-    subgraph NLP["NLP + Scoring"]
+    subgraph NLP["NLP + Scoring · DATA_INGEST + NLP_SCORING logged"]
         direction TB
         N1["FinBERT\nsentiment −1→+1"]
         N2["SpaCy NER\ncompany → ticker"]
@@ -69,45 +69,61 @@ flowchart TB
         N4["Threat classifier\nCRITICAL / HIGH / MEDIUM / LOW"]
     end
 
-    subgraph UNIVERSE["Universe — 3 Layers"]
+    subgraph UNIVERSE["Universe — 3 Layers · UNIVERSE logged"]
         direction LR
-        U1["Static watchlist\nscreener picks · 60 min score cycle"]
-        U2["HOT_UNIVERSE\nTTL cache · scored on entry"]
+        U1["L1: Static watchlist\nscreener picks · 60 min score cycle"]
+        U2["L2: HOT_UNIVERSE\nTTL cache · scored on entry"]
+        U3["L3: Feedback pool\nrecent winners · re-evaluated"]
     end
 
-    subgraph SCORES["8 Factor Scores (all 0–1)"]
+    subgraph SCORES["10 Factor Scores (all 0–1) · FACTOR_SCORES logged per symbol · trace_id assigned"]
         direction LR
         SC1["momentum_score"]
         SC2["quality_score"]
         SC3["technical_score"]
         SC4["valuation_score"]
         SC5["news_score"]
-        SC6["options_score"]
+        SC6["options_score\nyfinance EOD · v14"]
         SC7["macro_score"]
-        SC8["insider_score"]
+        SC8["alternative_score\ncong×0.50 + insider×0.35 + dark_pool×0.15"]
+        SC9["dark_pool_score\nFINRA ATS percentile · v14"]
     end
 
-    subgraph ORCH["Signal Orchestrator"]
+    subgraph PARALLEL["Parallel Execution · adaptive_workers = min(cpu_count, n_symbols)"]
+        direction LR
+        P1["asyncio.gather()\nI/O-bound: API calls, OHLCV fetch"]
+        P2["ThreadPoolExecutor\nCPU-bound: ML inference, RSI/MACD\nCX22=2 workers · Laptop=8 workers"]
+        P3["Serial\nExecution: portfolio mutations only"]
+    end
+
+    subgraph ORCH["Signal Orchestrator · SIGNAL + MODELS + CONSTRAINTS + ENTRY logged"]
         direction TB
         O1["composite = Σ signal_i × IC[signal_i][regime]"]
         O2["position_size = half_kelly × composite × regime_scalar"]
-        O3["IC tracking\nSpearman corr, rolling 90-day"]
+        O3["IC tracking · Spearman corr · rolling 90-day"]
     end
 
-    subgraph MODELS["Decision Models"]
+    subgraph MODELS["Decision Models — AutoGluon 1.5 · 5-gate auto-tester before deploy"]
         direction LR
-        M1["Entry LightGBM\nP(win) · triple-barrier labels"]
-        M2["Exit LSTM\nP(peak in next 5 days)\nbinary classifier"]
-        M3["Dip AutoGluon\nP(recovery) · drop + fundamental"]
-        M4["Tranche LightGBM\nP(continuation) · pyramid up"]
+        M1["Entry AutoGluon\nIC=0.883 · triple-barrier labels"]
+        M2["Exit AutoGluon\nIC=0.871 · peak detection"]
+        M3["Dip AutoGluon\nIC=0.867 · recovery classifier"]
+        M4["Tranche AutoGluon\nIC=0.802 · pyramid up/down"]
     end
 
-    subgraph AI["3-Tier AI Routing"]
+    subgraph AUTOTESTER["ML Auto-Tester · MODEL_EVAL logged"]
         direction LR
-        AI1["Groq Llama 3.3 70B\nroutine · tranche_verdict · free"]
-        AI2["Claude Haiku\nresearch · exit/dip_verdict · ~$0.72/mo"]
-        AI3["Claude Sonnet\nfinal decisions · ~$2/mo"]
-        AI4["Research Agent\nHaiku + Playwright browser"]
+        AT1["Gate 1: IC > 0"]
+        AT2["Gate 2: Calibration ±15%\nsoft fail → Platt scaling"]
+        AT3["Gate 3: Pareto dominance"]
+        AT4["Gate 4: PSI < 0.25\ndistribution shift"]
+        AT5["Gate 5: Regime breakdown\nall regimes must pass"]
+    end
+
+    subgraph AI["2-Tier AI Routing"]
+        direction LR
+        AI1["Groq Llama 3.3 70B\nroutine verdicts · free · ~50/day"]
+        AI2["Claude Sonnet\nfinal decisions · anomaly detection · ~$2/mo"]
     end
 
     subgraph HARD["Hard Constraints"]
@@ -121,18 +137,30 @@ flowchart TB
         H7["5 consecutive losses → alert human"]
     end
 
-    subgraph EXEC["Execution"]
+    subgraph EXEC["Execution · EXECUTION logged · serial"]
         direction LR
         E1["alpaca-py submit_order()"]
         E2["Poll until FILLED"]
-        E3["Trade Ledger · PostgreSQL · Telegram"]
+        E3["Trade Ledger · SQLite WAL · Telegram push"]
     end
 
-    subgraph FB["Feedback + Learning"]
+    subgraph LOG["Structured Logging · SQLite + JSONL · lookup_trace(trace_id)"]
+        direction TB
+        L1["logs/trade_lifecycle.db\n12 stages · O(1) lookup by trace_id"]
+        L2["logs/structured/trades_YYYYMMDD.jsonl\nplain-English why field · backup"]
+    end
+
+    subgraph TG["Telegram Interface — no SSH needed"]
+        direction LR
+        TG1["Push: trades, circuit breakers\ndaily digest 4:30PM · model alerts"]
+        TG2["Bot commands: /trace /status /positions\n/signals /health /report /audit /why"]
+    end
+
+    subgraph FB["Feedback + Learning · OUTCOME + FEEDBACK logged"]
         direction TB
         F1["alpha = trade_return − spy × beta"]
-        F2["ChromaDB RAG\nregime-matched queries"]
-        F3["AutoGluon retrain\nmonthly · 4 filters · IC validation"]
+        F2["ChromaDB RAG · regime-matched queries"]
+        F3["AutoGluon retrain → model_tester.py gates → deploy or rollback"]
     end
 
     I1 & I4 --> NLP
@@ -143,20 +171,27 @@ flowchart TB
     A1 --> SC6
     A2 --> SC7
     A3 --> SC8
-    A4 & A5 --> NLP
+    A4 --> SC8
+    A5 --> NLP
 
     NLP --> SC5
     NLP --> U2
 
-    U1 --> SCORES
-    U2 --> SCORES
-    SCORES --> ORCH
+    U1 & U2 & U3 --> SCORES
+    SCORES --> PARALLEL
+    PARALLEL --> ORCH
     ORCH --> MODELS
+    ORCH --> HARD
     MODELS --> AI
     AI --> HARD
     HARD --> EXEC
+    EXEC --> LOG
+    EXEC --> TG
     EXEC --> FB
     FB --> |"IC update"| ORCH
+    AUTOTESTER --> |"gate PASS → deploy"| MODELS
+    FB --> AUTOTESTER
+    LOG --> TG
 ```
 
 ### Scores-not-Gates: Position Sizing
@@ -182,22 +217,21 @@ flowchart LR
     style DIP fill:#1a1a28,stroke:#fbbf24
 ```
 
-### 3-Tier AI Routing
+### 2-Tier AI Routing (v14)
 
 ```mermaid
 flowchart LR
     Q["Decision type?"]
 
-    G["Groq Llama 3.3 70B\nFree tier\n14,400 req/day\ntranche_verdict()\nroutine consensus"]
-    H["Claude Haiku\nclaude-haiku-4-5-20251001\n~$0.72/mo\nexit_verdict()\ndip_verdict()\nresearch_agent()\nbear/base/bull scenarios"]
-    S["Claude Sonnet\nclaude-sonnet-4-6\n~$2/mo\nfinal orchestrator synthesis\nanomaly detection"]
-    R["Research Agent\nHaiku + Playwright\nbrowses SEC EDGAR\nanalyst ratings\nrecent news in real-time"]
+    G["Groq Llama 3.3 70B\nFree tier · 14,400 req/day\ntranche_verdict() · exit_verdict()\ndip_verdict() · all routine tasks"]
+    S["Claude Sonnet\nclaude-sonnet-4-6 · ~$2/mo\nfinal orchestrator synthesis\nanomaly detection · narrative shift"]
 
-    Q -->|"routine · high volume"| G
-    Q -->|"research · qualitative"| H
-    Q -->|"final gate · high-stakes"| S
-    H --> R
+    Q -->|"routine · high volume · free"| G
+    Q -->|"final gate · high-stakes · $2/mo"| S
 ```
+
+> **v14 change**: Claude Haiku removed — Groq (free) handles all verdict/classification
+> tasks at equivalent quality. Haiku added cost without measurable quality improvement.
 
 ### Exit Priority
 
@@ -212,27 +246,26 @@ flowchart LR
     P1 --> P2 --> P3 --> P4 --> P5
 ```
 
-### Backtester + Training Pipeline
+### Backtester + Training Pipeline (v14)
 
 ```mermaid
 flowchart TD
-    BT["intelligent_backtest.py\nvectorbt · point-in-time correct"]
+    SBT["system_backtest.py\nFull pipeline replay · 2 years · dry_run=True skips LLM\nPaper fills at t+1 open · SPY benchmark alongside"]
+    SA["signal_audit.py\nIC per signal per regime · 5/10/20d horizons\ncalibrates IC weight defaults in orchestrator"]
+    BT["intelligent_backtest.py\nvectorbt · ML training data\npoint-in-time correct · alpha-beta separated"]
     REG["4 Regime Windows\nbull · crash · recovery · sideways"]
-    RS["robust_sharpe\n= min(sharpe per window)\nworst-case, not average"]
-    MO["Multi-objective oracle\nprofit ≥ 20%\navg_position ≥ 5%\nnot Pareto-dominated"]
-    AB["Alpha-beta separation\nalpha = trade_return\n− spy_return × stock_beta"]
-    DS["Labeled dataset\n{features, entry_label,\nexit_label, dip_label,\nalpha} per record"]
-    AG["AutoGluon\ntries 22+ models\nensembles winners"]
-    CV["mlfinlab CPCV\npurged cross-validation\nhonest IC ~54%"]
-    ENTRY["Entry LightGBM\nvalidate IC > 0 first"]
-    EXIT["Exit LSTM\nbuild after entry validated"]
-    DIP["Dip AutoGluon\nbuild after exit validated"]
+    RS["robust_sharpe = min(sharpe per window)\nworst-case, not average"]
+    MO["Multi-objective oracle\nprofit ≥ 20% · avg_position ≥ 5%\nnot Pareto-dominated"]
+    AB["Alpha-beta separation\nalpha = trade_return − spy_return × stock_beta"]
+    DS["Labeled dataset\n{features, entry_label, exit_label,\ndip_label, tranche_label, alpha}"]
+    AG["AutoGluon 1.5\nauto-selects model · ensembles"]
+    AT["model_tester.py · 5 gates\nIC>0 · calibration ±15%\nPareto · PSI<0.25 · regime breakdown"]
+    DEPLOY["Deploy or Rollback\nTelegram alert on any gate fail"]
 
-    BT --> REG --> RS
+    SBT --> REG --> RS
     BT --> MO
-    BT --> AB --> DS
-    DS --> AG --> CV
-    CV --> ENTRY --> EXIT --> DIP
+    BT --> AB --> DS --> AG --> AT --> DEPLOY
+    SA --> |"recalibrate IC weights"| SBT
 ```
 
 ---

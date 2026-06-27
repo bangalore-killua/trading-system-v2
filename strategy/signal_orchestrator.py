@@ -108,14 +108,40 @@ class SignalOrchestrator:
           "vix_scaling":      float,
         }
         """
+        trace_id = signal_inputs.get("_trace_id")
+        cycle_id = signal_inputs.get("_cycle_id")
+
+        try:
+            from data.logging.trade_logger import stage as tl_stage, new_trace, WhyAnalyzer
+            _tl = True
+        except Exception:
+            _tl = False
+
         # ── Layer 4 first: hard constraints (always check before computing) ───
         hard_gate = self._check_hard_gates(symbol, regime)
         if hard_gate:
+            if _tl and trace_id:
+                tl_stage(trace_id, symbol, "CONSTRAINTS", cycle_id).result("FAIL").reason(hard_gate).why(
+                    WhyAnalyzer.constraints(False, hard_gate,
+                        self._portfolio.get("cash_pct", 0.5),
+                        self._portfolio.get("exposure_pct", 0))
+                ).emit()
             return self._gate_result(symbol, regime, hard_gate)
 
         # ── Layer 1: IC-weighted composite score ──────────────────────────────
         signal_scores  = self._compute_signal_scores(signal_inputs, regime)
         composite      = self._ic_weighted_composite(signal_scores, regime)
+
+        if _tl:
+            if not trace_id:
+                trace_id, _log = new_trace(symbol, "SIGNAL", cycle_id)
+                _log.result("PASS").signals(signal_scores).model({"composite": composite}).why(
+                    WhyAnalyzer.signal(composite, signal_scores, cycle_id or "")
+                ).emit()
+            else:
+                tl_stage(trace_id, symbol, "SIGNAL", cycle_id).result("PASS").signals(signal_scores).model(
+                    {"composite": composite}
+                ).why(WhyAnalyzer.signal(composite, signal_scores, cycle_id or "")).emit()
 
         # ── VIX scaling ───────────────────────────────────────────────────────
         vix        = self._portfolio.get("vix", 20)
@@ -129,12 +155,37 @@ class SignalOrchestrator:
             vix_scale  = vix_scale,
         )
 
+        # ── MODELS log (model probabilities from signal_inputs) ───────────────
+        if _tl and trace_id:
+            entry_p   = float(signal_inputs.get("entry_model_prob", 0.5))
+            tl_stage(trace_id, symbol, "MODELS", cycle_id).result("PASS").model({
+                "entry_P":   entry_p,
+                "composite": composite,
+            }).why(WhyAnalyzer.models(entry_p, 0.5, None, None)).emit()
+
+        # ── CONSTRAINTS log (passed — would have returned early otherwise) ────
+        if _tl and trace_id:
+            tl_stage(trace_id, symbol, "CONSTRAINTS", cycle_id).result("PASS").why(
+                WhyAnalyzer.constraints(True, None,
+                    self._portfolio.get("cash_pct", 0.5),
+                    self._portfolio.get("exposure_pct", 0))
+            ).emit()
+
         # ── Layer 3: Claude Sonnet anomaly check (only for high-composite signals) ──
         sonnet_anomaly = None
         if composite >= 0.55 and not dry_run:
             sonnet_anomaly = await self._sonnet_anomaly_check(symbol, signal_inputs, composite, regime)
 
         action = "enter_t1" if composite >= COMPOSITE_THRESHOLD else "skip"
+
+        # ── ENTRY log ─────────────────────────────────────────────────────────
+        if _tl and trace_id:
+            rsi = signal_inputs.get("rsi_14")
+            tl_stage(trace_id, symbol, "ENTRY", cycle_id).result("PASS" if action != "skip" else "SKIP").model({
+                "action": action, "composite": composite, "size_pct": round(size_pct * 100, 2), "vix_scale": vix_scale,
+            }).decision(action).why(
+                WhyAnalyzer.entry(action, composite, size_pct * 100, rsi, vix_scale)
+            ).emit()
 
         return {
             "symbol":           symbol,
@@ -147,6 +198,7 @@ class SignalOrchestrator:
             "regime":           regime,
             "vix_scaling":      vix_scale,
             "evaluated_at":     datetime.now().isoformat(),
+            "_trace_id":        trace_id,
         }
 
     # ── Signal scoring ────────────────────────────────────────────────────────
@@ -172,8 +224,10 @@ class SignalOrchestrator:
         if "fundamental_score" in inputs:
             scores["fundamental"] = float(inputs["fundamental_score"])
 
-        # Insider/congressional (highest IC empirically)
-        if "insider_score" in inputs:
+        # Alternative: v14 composite (congressional + insider + dark pool); fall back to v13 insider_score
+        if "alternative_score" in inputs:
+            scores["alternative"] = float(inputs["alternative_score"])
+        elif "insider_score" in inputs:
             scores["alternative"] = float(inputs["insider_score"])
 
         # Options flow (Unusual Whales)

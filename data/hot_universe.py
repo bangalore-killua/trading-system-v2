@@ -168,6 +168,33 @@ class HotUniverse:
             except Exception:
                 logger.exception("HOT_UNIVERSE callback error for %s", symbol)
 
+    def emit_universe_log(
+        self,
+        cycle_id: Optional[str] = None,
+        watchlist_count: int = 0,
+        feedback_count: int = 0,
+        added: Optional[list] = None,
+        evicted: Optional[list] = None,
+    ) -> None:
+        """Emit a UNIVERSE stage log entry for the current cycle."""
+        try:
+            from data.logging.trade_logger import stage as tl_stage, WhyAnalyzer
+        except Exception:
+            return
+        with self._lock:
+            self._purge_expired()
+            hot_count = len(self._entries)
+        tid = cycle_id or "NOCYCLE"
+        tl_stage(tid, "__CYCLE__", "UNIVERSE", cycle_id).result("PASS").signals({
+            "layer1_watchlist": watchlist_count,
+            "layer2_hot":       hot_count,
+            "layer3_feedback":  feedback_count,
+            "total":            watchlist_count + hot_count + feedback_count,
+        }).why(WhyAnalyzer.universe(
+            watchlist_count, hot_count, feedback_count,
+            added or [], evicted or [],
+        )).emit()
+
     def _purge_expired(self) -> None:
         # Must be called with self._lock held
         expired = [s for s, e in self._entries.items() if e.is_expired()]
