@@ -863,12 +863,20 @@ async def main():
     parser.add_argument("--end",          type=str,   default=None)
     parser.add_argument("--symbols",      nargs="+",  default=["NVDA", "AAPL", "MSFT"])
     parser.add_argument("--full-universe",action="store_true")
+    parser.add_argument("--oos",          action="store_true", help="Use config.json oos_test_watchlist (symbols never seen during training)")
     parser.add_argument("--options",      action="store_true", help="Simulate long call positions")
     parser.add_argument("--dry",          action="store_true", help="14-day smoke test")
     parser.add_argument("--cash",         type=float, default=100_000.0)
     args = parser.parse_args()
 
-    if args.full_universe:
+    if args.oos:
+        cfg     = json.loads(Path("config.json").read_text())
+        symbols = cfg.get("oos_test_watchlist", {}).get("symbols", [])
+        if not symbols:
+            logger.error("oos_test_watchlist.symbols is empty in config.json")
+            sys.exit(1)
+        logger.info("OOS test mode: %d symbols (out-of-sample, not used during training)", len(symbols))
+    elif args.full_universe:
         cfg = json.loads(Path("config.json").read_text())
         wl  = cfg.get("watchlist", {})
         symbols = (wl.get("mandatory", []) + wl.get("screener_picks", [])

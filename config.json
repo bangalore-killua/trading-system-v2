@@ -236,6 +236,19 @@
     "take_profit_pct": 100,
     "close_dte_threshold": 7
   },
+  "oos_test_watchlist": {
+    "_comment": "Out-of-sample symbols — NOT in training watchlist. Use for model generalization testing via ml_backtest --oos. Never add to mandatory watchlist.",
+    "symbols": [
+      "KLAC", "LRCX", "AMAT", "MU",
+      "ADBE", "NOW",  "INTU", "DDOG", "NET",
+      "MA",   "C",    "BX",   "TFC",
+      "MRK",  "BMY",  "ISRG", "CVS",
+      "TGT",  "LULU", "LOW",  "ABNB",
+      "MPC",  "EOG",
+      "ETN",  "LIN",  "NUE",
+      "EQIX", "DLR"
+    ]
+  },
   "performance": {
     "benchmark": "SPY",
     "report_output_dir": "logs/performance",
