@@ -31,6 +31,7 @@ models/*.lgb
 models/autogluon_entry/
 models/autogluon_exit/
 models/autogluon_dip/
+models/autogluon_tranche/
 # YOLOv8 weights (87MB — download separately)
 models/*.pt
 
