@@ -270,6 +270,9 @@ async def main() -> None:
     scheduler.fundamentals_fetcher = fundamentals_fetcher  # weekly Sunday refresh
     scheduler.db = db                                    # daily performance report
 
+    from data.model_health_reporter import ModelHealthReporter  # v14
+    scheduler.model_health_reporter = ModelHealthReporter()     # v14: Sunday 8am digest
+
     logger.info("Starting trading system...")
     await scheduler.start()
 

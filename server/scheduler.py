@@ -61,6 +61,7 @@ class TradingScheduler:
         self.options_stream = None         # OptionDataStreamManager (Phase 4)
         self.fundamentals_fetcher = None   # FundamentalsFetcher (weekly refresh)
         self.db = None                     # TradingDatabase (performance report)
+        self.model_health_reporter = None  # ModelHealthReporter (v14 — weekly Sunday 8am digest)
         self._last_regime: str = ""        # tracks regime changes for protective put trigger
 
     async def start(self) -> None:
@@ -108,6 +109,15 @@ class TradingScheduler:
         # Signal that startup is complete
         self._startup_done.set()
         logger.info("=== Startup complete — scheduler running ===")
+
+        # v14: Launch interactive Telegram bot (non-blocking background task)
+        if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
+            try:
+                from data.notifications.telegram_bot import start_bot
+                asyncio.create_task(start_bot(), name="telegram_bot")
+                logger.info("Telegram interactive bot started")
+            except Exception as exc:
+                logger.warning("Telegram bot failed to start: %s", exc)
 
         # Keep the event loop alive; stream_tasks run until stop() is called
         if stream_tasks:
@@ -215,6 +225,19 @@ class TradingScheduler:
             max_instances=1,
             misfire_grace_time=7200,
             name="Retrain LightGBM meta-model on live trade labels",
+        )
+
+        # ── v14: Weekly model health digest (Sunday 8am) ────────────────────
+        self._scheduler.add_job(
+            self._send_model_health_report,
+            trigger=CronTrigger(
+                day_of_week=sched_cfg.get("model_health_report_day", "sun"),
+                hour=sched_cfg.get("model_health_report_hour", 8),
+            ),
+            id="model_health_report",
+            max_instances=1,
+            misfire_grace_time=3600,
+            name="Weekly model health digest via Telegram",
         )
 
         # ── Phase 4: Option position monitoring (every 15 min, only if enabled) ──
@@ -511,6 +534,26 @@ class TradingScheduler:
                     error_type=type(exc).__name__,
                     cause=str(exc),
                     affects="Daily HTML tearsheet and performance summary message",
+                )
+
+    async def _send_model_health_report(self) -> None:
+        """Sunday 8am: send weekly model IC / calibration / trade stats digest via Telegram."""
+        if not self.model_health_reporter:
+            logger.debug("model_health_reporter not wired — skipping weekly digest")
+            return
+        try:
+            await asyncio.get_event_loop().run_in_executor(
+                None, self.model_health_reporter.send_weekly_report
+            )
+            logger.info("Weekly model health report sent")
+        except Exception as exc:
+            logger.exception("Weekly model health report failed")
+            if self.telegram:
+                await self.telegram.send_failure(
+                    source="TradingScheduler._send_model_health_report",
+                    error_type=type(exc).__name__,
+                    cause=str(exc),
+                    affects="Weekly model IC digest — no Telegram report this Sunday",
                 )
 
     def _on_hot_symbol(self, symbol: str, source: str) -> None:

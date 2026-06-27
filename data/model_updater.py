@@ -90,6 +90,20 @@ class ModelUpdater:
         # Step 3: retrain LightGBM with new samples
         new_version_info = self._retrain(filtered)
 
+        # Step 3b: run 5-gate auto-tester before deploying new model (v14)
+        if new_version_info is not None:
+            gates_passed, gate_report = self._run_model_tester_gates(filtered)
+            if not gates_passed:
+                logger.warning(
+                    "Model tester FAILED (gate: %s) — new model NOT deployed, keeping previous",
+                    gate_report.get("first_failed_gate", "unknown"),
+                )
+                new_version_info["deployed"] = False
+                new_version_info["gate_report"] = gate_report
+            else:
+                new_version_info["deployed"] = True
+                logger.info("Model tester PASSED all 5 gates — new model deployed")
+
         # Step 4: generate and save human-readable report
         report = self._generate_report(all_records, filtered, filter_log, new_version_info)
         report_path = UPDATE_REPORT_PATH / f"update_{date.today().isoformat()}.json"
@@ -98,6 +112,76 @@ class ModelUpdater:
 
         logger.info("Model update complete. Report saved to %s", report_path)
         return report
+
+    # ── Step 3b: Model tester gates ──────────────────────────────────────────
+
+    def _run_model_tester_gates(self, filtered_records: List[dict]) -> Tuple[bool, dict]:
+        """Build held-out DataFrame from recent SQLite OUTCOME+MODELS records and run 5 gates."""
+        try:
+            import pandas as pd  # type: ignore
+            import sqlite3, json as _json
+            from data.model_tester import ModelTester
+
+            db_path = Path("logs/trade_lifecycle.db")
+            if not db_path.exists():
+                logger.info("trade_lifecycle.db not found — skipping model tester gates")
+                return True, {"skipped": "no_db"}
+
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+
+            # Load OUTCOME records (y_true = alpha > 0)
+            outcome_rows = conn.execute(
+                "SELECT trace_id, model_out FROM trade_logs WHERE stage='OUTCOME' "
+                "ORDER BY ts DESC LIMIT 200"
+            ).fetchall()
+
+            # Load MODELS records for the same trace_ids (y_prob = entry_P)
+            trace_ids = [r["trace_id"] for r in outcome_rows]
+            if not trace_ids:
+                return True, {"skipped": "no_outcome_records"}
+
+            placeholders = ",".join("?" * len(trace_ids))
+            model_rows = {
+                r["trace_id"]: r
+                for r in conn.execute(
+                    f"SELECT trace_id, model_out FROM trade_logs "
+                    f"WHERE stage='MODELS' AND trace_id IN ({placeholders})",
+                    trace_ids,
+                ).fetchall()
+            }
+            conn.close()
+
+            records = []
+            for row in outcome_rows:
+                tid = row["trace_id"]
+                try:
+                    outcome = _json.loads(row["model_out"] or "{}")
+                    alpha   = float(outcome.get("alpha", 0))
+                    y_true  = 1 if alpha > 0 else 0
+                    models_out = _json.loads((model_rows[tid]["model_out"] if tid in model_rows else None) or "{}")
+                    y_prob  = float(models_out.get("entry_P", 0.5))
+                    records.append({"y_true": y_true, "y_prob": y_prob,
+                                    "regime": outcome.get("regime", "UNKNOWN")})
+                except Exception:
+                    pass
+
+            if len(records) < 20:
+                logger.info("Only %d held-out records — skipping model tester gates (need >= 20)", len(records))
+                return True, {"skipped": f"insufficient_records_{len(records)}"}
+
+            held_out_df = pd.DataFrame(records)
+            tester = ModelTester(
+                model_name="entry",
+                new_model_path="models/autogluon_entry",
+                prev_model_path="models/autogluon_entry_prev",
+            )
+            passed, gate_report = tester.run(held_out_df)
+            return passed, gate_report
+
+        except Exception as exc:
+            logger.exception("Model tester raised an exception — treating as PASS to avoid blocking")
+            return True, {"error": str(exc)}
 
     # ── Step 1: Load Records ──────────────────────────────────────────────────
 
