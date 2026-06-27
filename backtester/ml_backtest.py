@@ -613,6 +613,10 @@ class MLBacktest:
                 for sym in self.symbols
             }
 
+            if i % 50 == 0:
+                logger.info("Day %d/%d  %s  positions=%d  cash=%.0f",
+                            i, n_days, dt_str, len(portfolio.positions), portfolio.cash)
+
             # Advance hold counters
             portfolio.tick(prices)
 
@@ -622,40 +626,43 @@ class MLBacktest:
             # Max-hold forced exit
             portfolio.check_max_hold(prices, dt_str, spy_ret, hist_vols)
 
-            # Exit signals (for held positions)
-            if exit_model is not None:
-                for sym in list(portfolio.positions.keys()):
-                    price = prices.get(sym)
-                    if not price:
-                        continue
-                    row = self._get_row(ind.get(sym, pd.DataFrame()), dt)
-                    if row.empty:
-                        continue
-                    fv = _build_feature_row(sym, row, funds[sym], vix_val, ys_val,
-                                             spy_row, regime)
-                    exit_P = self._predict_proba(exit_model, fv, exit_feat_names)
-                    if exit_P is not None and exit_P >= EXIT_THRESH:
-                        portfolio.exit(sym, price, dt_str, "model_exit",
-                                       spy_ret, hist_vols.get(sym, 0.20))
+            # ── Build all feature vectors for the day in one pass ──────────────
+            sym_fvs: Dict[str, dict] = {}
+            for sym in self.symbols:
+                if not prices.get(sym):
+                    continue
+                row = self._get_row(ind.get(sym, pd.DataFrame()), dt)
+                if row.empty:
+                    continue
+                sym_fvs[sym] = _build_feature_row(
+                    sym, row, funds[sym], vix_val, ys_val, spy_row, regime
+                )
 
-            # Entry signals (for symbols not in portfolio)
+            # ── Batch exit: one predict_proba call for all held positions ──────
+            if exit_model is not None and portfolio.positions:
+                held = [s for s in portfolio.positions if s in sym_fvs]
+                if held:
+                    exit_probs = self._batch_predict(
+                        exit_model, [sym_fvs[s] for s in held], exit_feat_names
+                    )
+                    for sym, exit_P in zip(held, exit_probs):
+                        if exit_P is not None and exit_P >= EXIT_THRESH:
+                            portfolio.exit(sym, prices[sym], dt_str, "model_exit",
+                                           spy_ret, hist_vols.get(sym, 0.20))
+
+            # ── Batch entry: one predict_proba call for all candidates ─────────
             if entry_model is not None:
-                pv = portfolio.value(prices)
-                for sym in self.symbols:
-                    if sym in portfolio.positions:
-                        continue
-                    price = prices.get(sym)
-                    if not price:
-                        continue
-                    row = self._get_row(ind.get(sym, pd.DataFrame()), dt)
-                    if row.empty:
-                        continue
-                    fv = _build_feature_row(sym, row, funds[sym], vix_val, ys_val,
-                                             spy_row, regime)
-                    entry_P = self._predict_proba(entry_model, fv, entry_feat_names)
-                    if entry_P is not None and entry_P >= ENTRY_THRESH:
-                        portfolio.enter(sym, price, dt_str, entry_P, pv,
-                                        self.simulate_options, hist_vols.get(sym, 0.20))
+                pv   = portfolio.value(prices)
+                cands = [s for s in self.symbols
+                         if s not in portfolio.positions and s in sym_fvs]
+                if cands:
+                    entry_probs = self._batch_predict(
+                        entry_model, [sym_fvs[s] for s in cands], entry_feat_names
+                    )
+                    for sym, entry_P in zip(cands, entry_probs):
+                        if entry_P is not None and entry_P >= ENTRY_THRESH:
+                            portfolio.enter(sym, prices[sym], dt_str, entry_P, pv,
+                                            self.simulate_options, hist_vols.get(sym, 0.20))
 
             portfolio.equity_curve.append(portfolio.value(prices))
 
@@ -751,12 +758,14 @@ class MLBacktest:
         return 0.25
 
     @staticmethod
-    def _predict_proba(
-        model, fv: dict, feat_names: Optional[List[str]]
-    ) -> Optional[float]:
+    def _batch_predict(
+        model, fv_list: List[dict], feat_names: Optional[List[str]]
+    ) -> List[Optional[float]]:
+        """Single predict_proba call for N feature vectors — avoids per-row overhead."""
+        if not fv_list:
+            return []
         try:
-            row = {k: [v] for k, v in fv.items()}
-            df  = pd.DataFrame(row)
+            df = pd.DataFrame(fv_list)
             if feat_names:
                 for f in feat_names:
                     if f not in df.columns:
@@ -764,13 +773,21 @@ class MLBacktest:
                 df = df[feat_names]
             proba = model.predict_proba(df)
             if hasattr(proba, "iloc"):
-                cols = proba.columns.tolist()
+                cols    = proba.columns.tolist()
                 pos_col = 1 if 1 in cols else True if True in cols else cols[-1]
-                return float(proba.iloc[0][pos_col])
-            return float(proba[0])
+                return [float(proba.iloc[j][pos_col]) for j in range(len(proba))]
+            return [float(p) for p in proba]
         except Exception as e:
-            logger.debug("predict_proba failed: %s", e)
-            return None
+            logger.debug("batch_predict failed: %s", e)
+            return [None] * len(fv_list)
+
+    @staticmethod
+    def _predict_proba(
+        model, fv: dict, feat_names: Optional[List[str]]
+    ) -> Optional[float]:
+        """Single-row wrapper — kept for compatibility, not used in main loop."""
+        result = MLBacktest._batch_predict(model, [fv], feat_names)
+        return result[0] if result else None
 
     def _compile_report(self, portfolio: _Portfolio) -> dict:
         trades = portfolio.trades
