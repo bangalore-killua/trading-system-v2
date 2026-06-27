@@ -402,6 +402,30 @@ tr:hover td { background: var(--bg-hover); }
       </div>
       <h2 style="margin-top:16px;margin-bottom:12px;">Detected Patterns</h2>
       <div id="patterns-content" class="patterns-grid"><span class="loading-text">Select a symbol and click Analyse</span></div>
+
+      <!-- ── System Decision Chart ─────────────────────────── -->
+      <h2 style="margin-top:24px;margin-bottom:4px">
+        System Decisions
+        <span id="sig-sym-label" style="color:var(--accent);font-size:13px;font-weight:400;margin-left:8px"></span>
+      </h2>
+      <p style="font-size:11px;color:var(--text-dim);margin-bottom:10px">
+        Entry / exit markers from all logic layers: technical → ML models → AI consensus gate
+      </p>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+        <button class="tf-btn active" id="sp-3mo" onclick="setSigPeriod('3mo',this)">3M</button>
+        <button class="tf-btn"        id="sp-6mo" onclick="setSigPeriod('6mo',this)">6M</button>
+        <button class="tf-btn"        id="sp-1y"  onclick="setSigPeriod('1y',this)">1Y</button>
+        <button class="tf-btn"        id="sp-2y"  onclick="setSigPeriod('2y',this)">2Y</button>
+        <span id="sig-legend" style="font-size:11px;color:var(--text-dim);margin-left:4px"></span>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-dim)">
+          ↑ <span style="color:#22c55e">Entry</span> &nbsp;
+          ↓ <span style="color:#ef4444">Exit</span> &nbsp;
+          ● <span style="color:#6366f1">Signal score</span> &nbsp;
+          ■ <span style="color:#f59e0b">AI gate</span>
+        </span>
+      </div>
+      <div id="sig-chart-container" style="width:100%;height:360px;border-radius:8px;overflow:hidden;background:var(--bg-primary)"></div>
+      <div id="sig-trades-table" style="margin-top:12px"></div>
     </div>
 
     <!-- Analysis tab (analyst ratings + scenarios) -->
@@ -644,6 +668,127 @@ async function analyseSymbol() {
   loadFilings(sym);
   loadSymbolNews(sym);
   loadGraph(1);
+  loadSignalChart(sym);   // decision overlay chart
+}
+
+// ── Signal decision chart ──────────────────────────────────────────────────
+let _sigChart     = null;
+let _sigCandleSer = null;
+let _sigPeriod    = '1y';
+let _sigSym       = '';
+
+function initSignalChart() {
+  if (typeof LightweightCharts === 'undefined') return;
+  const container = $('sig-chart-container');
+  if (!container || _sigChart) return;
+  _sigChart = LightweightCharts.createChart(container, {
+    width:  container.clientWidth,
+    height: 360,
+    layout: { background: { color: '#0a0a0f' }, textColor: '#64748b' },
+    grid:   { vertLines: { color: '#1a1a28' }, horzLines: { color: '#1a1a28' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#2d2d4a' },
+    timeScale: { borderColor: '#2d2d4a' },
+  });
+  _sigCandleSer = _sigChart.addCandlestickSeries({
+    upColor: '#22c55e', downColor: '#ef4444',
+    borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+    wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+  });
+  new ResizeObserver(() => {
+    if (_sigChart) _sigChart.resize(container.clientWidth, 360);
+  }).observe(container);
+}
+
+async function loadSignalChart(sym, period) {
+  initSignalChart();
+  if (!_sigChart || !sym) return;
+  sym = sym.toUpperCase();
+  period = period || _sigPeriod;
+  _sigSym = sym; _sigPeriod = period;
+
+  const symLabel = $('sig-sym-label');
+  if (symLabel) symLabel.textContent = sym;
+  const leg = $('sig-legend');
+  if (leg) leg.textContent = 'Loading…';
+
+  const [cd, sd] = await Promise.all([
+    api('/api/chart/' + sym + '?period=' + period),
+    api('/api/chart/' + sym + '/signals'),
+  ]);
+
+  if (!cd || cd.status !== 'ok' || !cd.data?.candles?.length) {
+    if (leg) leg.textContent = 'No price data';
+    return;
+  }
+  _sigCandleSer.setData(cd.data.candles);
+
+  const markers = [];
+  if (sd && sd.status === 'ok') {
+    for (const s of (sd.data || [])) {
+      if (s.type === 'entry') {
+        markers.push({ time: s.date, position: 'belowBar', color: '#22c55e',
+          shape: 'arrowUp',   text: 'ENTRY' + (s.label ? ' ' + s.label : '') });
+      } else if (s.type === 'exit') {
+        const win = (s.pnl || 0) >= 0;
+        markers.push({ time: s.date, position: 'aboveBar', color: win ? '#22c55e' : '#ef4444',
+          shape: 'arrowDown', text: 'EXIT'  + (s.label ? ' ' + s.label : '') });
+      } else if (s.type === 'signal') {
+        markers.push({ time: s.date, position: 'aboveBar', color: '#6366f1',
+          shape: 'circle',    text: s.label || 'SIG' });
+      } else if (s.type === 'ai') {
+        markers.push({ time: s.date, position: 'belowBar', color: '#f59e0b',
+          shape: 'square',    text: s.label || 'AI' });
+      }
+    }
+    markers.sort((a, b) => a.time.localeCompare(b.time));
+    _sigCandleSer.setMarkers(markers);
+    if (leg) leg.textContent = markers.length
+      ? markers.length + ' decision markers'
+      : 'No decisions logged yet for ' + sym + ' — run system live to populate';
+
+    // Render trade history table
+    renderSigTrades(sd.data.filter(s => s.pnl != null));
+  } else {
+    if (leg) leg.textContent = 'No decision log — run system live to populate';
+  }
+  _sigChart.timeScale().fitContent();
+}
+
+function renderSigTrades(trades) {
+  const el = $('sig-trades-table');
+  if (!el) return;
+  if (!trades.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <h3 style="font-size:12px;color:var(--text-dim);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Trade history</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead><tr style="color:var(--text-dim);text-transform:uppercase;font-size:10px">
+        <th style="text-align:left;padding:4px 8px">Entry date</th>
+        <th style="text-align:left;padding:4px 8px">Exit date</th>
+        <th style="text-align:right;padding:4px 8px">P(win)</th>
+        <th style="text-align:right;padding:4px 8px">Alpha</th>
+        <th style="text-align:left;padding:4px 8px">Reason</th>
+      </tr></thead>
+      <tbody>${trades.slice(0,15).map(t => `
+        <tr style="border-top:1px solid var(--border)">
+          <td style="padding:4px 8px;color:var(--text-primary)">${t.entry_date||'—'}</td>
+          <td style="padding:4px 8px;color:var(--text-dim)">${t.date||'—'}</td>
+          <td style="padding:4px 8px;text-align:right;color:var(--accent)">${t.entry_P ? (t.entry_P*100).toFixed(0)+'%' : '—'}</td>
+          <td style="padding:4px 8px;text-align:right;color:${(t.pnl||0)>=0?'var(--green)':'var(--red)'}">${t.pnl!=null?((t.pnl>=0?'+':'')+t.pnl.toFixed(2)+'%'):'—'}</td>
+          <td style="padding:4px 8px;color:var(--text-dim)">${t.reason||'—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function setSigPeriod(period, btn) {
+  _sigPeriod = period;
+  ['3mo','6mo','1y','2y'].forEach(p => {
+    const b = $('sp-' + p.replace('mo','-'));  // period btn id trick won't work, use class
+  });
+  document.querySelectorAll('#tab-chart .tf-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (_sigSym) loadSignalChart(_sigSym, period);
 }
 
 function switchTab(tabId) {

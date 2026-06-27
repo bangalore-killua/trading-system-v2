@@ -2066,6 +2066,93 @@ def _fmt_financial(val: float) -> str:
 
 # ── Dashboard ─────────────────────────────────────────────────
 
+@app.get("/api/chart/{symbol}/signals")
+async def get_chart_signals(symbol: str, days: int = 730):
+    """Entry/exit/signal/AI decision markers from trade_lifecycle.db for chart overlay."""
+    import sqlite3
+    from datetime import datetime, timedelta
+    db_path = Path("logs/trade_lifecycle.db")
+    if not db_path.exists():
+        return {"status": "ok", "data": []}
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    sym   = symbol.upper()
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT timestamp, stage, decision, score, reason, model_data
+            FROM trade_logs
+            WHERE symbol = ? AND timestamp >= ?
+            AND stage IN ('ENTRY','EXECUTION','OUTCOME','SIGNAL','MODELS')
+            ORDER BY timestamp ASC
+        """, (sym, since))
+        rows = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    markers = []
+    for r in rows:
+        try:
+            ts    = str(r["timestamp"])[:10]
+            stage = r["stage"]
+            md: dict = {}
+            if r["model_data"]:
+                md = json.loads(r["model_data"])
+        except Exception:
+            continue
+        if stage == "ENTRY":
+            ep = md.get("entry_P") or r["score"]
+            markers.append({"type": "entry", "date": ts,
+                             "label": f"P={int((ep or 0)*100)}%",
+                             "entry_P": ep, "reason": r["reason"] or ""})
+        elif stage in ("OUTCOME", "EXECUTION"):
+            alpha  = md.get("alpha", 0) or 0
+            reason = md.get("exit_reason") or r["reason"] or ""
+            markers.append({"type": "exit", "date": ts,
+                             "label": f"{'+' if alpha>=0 else ''}{alpha*100:.1f}%α",
+                             "pnl": round(alpha * 100, 2),
+                             "reason": reason,
+                             "entry_date": md.get("entry_date"),
+                             "entry_P": md.get("entry_P")})
+        elif stage == "SIGNAL":
+            sc = r["score"] or md.get("composite_score")
+            if sc and sc > 0.58:
+                markers.append({"type": "signal", "date": ts,
+                                 "label": f"{int(sc*100)}%"})
+        elif stage == "MODELS":
+            dec = r["decision"] or ""
+            if any(dec.startswith(x) for x in ("BUY", "STRONG")):
+                markers.append({"type": "ai", "date": ts, "label": dec})
+    return {"status": "ok", "data": markers}
+
+
+@app.get("/api/chart/{symbol}")
+async def get_chart_data(symbol: str, period: str = "3mo"):
+    """OHLCV candles for Lightweight Charts. period: 1mo|3mo|6mo|1y|2y"""
+    try:
+        import yfinance as yf
+        import pandas as pd
+        hist = yf.Ticker(symbol.upper()).history(period=period, interval="1d")
+        if hist.empty:
+            return {"status": "error", "message": "No data"}
+        candles = []
+        for ts, row in hist.iterrows():
+            if pd.isna(row.get("Open", float("nan"))):
+                continue
+            candles.append({
+                "time":   ts.strftime("%Y-%m-%d"),
+                "open":   round(float(row["Open"]),  4),
+                "high":   round(float(row["High"]),  4),
+                "low":    round(float(row["Low"]),   4),
+                "close":  round(float(row["Close"]), 4),
+                "volume": int(row.get("Volume", 0)),
+            })
+        return {"status": "ok", "data": {"symbol": symbol.upper(), "candles": candles}}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/dashboard")
 def serve_dashboard():
     return FileResponse("dashboard/index.html")
