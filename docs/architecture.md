@@ -1,4 +1,4 @@
-# System Architecture (v13)
+# System Architecture (v14)
 
 ## Full Signal Pipeline
 
@@ -17,9 +17,10 @@ flowchart TB
 
     subgraph ALT["Alternative Data Layer"]
         direction TB
-        A1["Unusual Whales\noptions call/put ratio\nPlaywright + Barchart fallback"]
+        A1["yfinance option_chain()\nEOD options · call/put ratio · IV skew\nreplaces Unusual Whales (v14)"]
         A2["FRED API\nyield curve (T10Y2Y)\ncredit spread (BAMLH0A0HYM2)\nVIX term structure"]
-        A3["Congressional Trades\nCapitolTrades + Senate EFTS\n6h cache · free"]
+        A3["Congressional Trades\nCapitolTrades + Senate EFTS · 6h cache · free\n→ alternative_score component (×0.50)"]
+        A7["FINRA ATS API · v14\ndark pool % of total volume\nweekly · free · → alternative_score (×0.15)"]
         A4["Earnings Whispers\nwhisper vs consensus\nPlaywright + RSS fallback"]
         A5["StockTwits\nretail sentiment\nfree public API"]
         A6["Google News RSS\ncredibility 0.60\nheadline velocity signal"]

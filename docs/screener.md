@@ -1,8 +1,10 @@
-# Universe Screener (v13)
+# Universe Screener (v14)
 
 ## Philosophy
 
-`data/screener.py` builds the candidate universe using 4 parallel discovery methods, then scores each candidate with **8 factor scores** (all 0–1 normalised) that feed the signal orchestrator as IC-weighted inputs.
+`data/screener.py` builds the candidate universe using 4 parallel discovery methods, then scores each candidate with **10 factor scores** (all 0–1 normalised) that feed the signal orchestrator as IC-weighted inputs.
+
+**v14 changes:** `options_score` now uses `yfinance.option_chain()` (replaces Unusual Whales Playwright). `alternative_score` replaces `insider_score` — a weighted composite of congressional (0.50), Form 4 insider (0.35), and FINRA dark pool (0.15). Each symbol evaluation is assigned a `trace_id` and logged to `logs/trade_lifecycle.db` as stage `FACTOR_SCORES`.
 
 The screener does NOT eliminate stocks — it scores them. The composite score drives position size.
 
@@ -27,9 +29,10 @@ The screener does NOT eliminate stocks — it scores them. The composite score d
 - `config.json` → `watchlist.mandatory` and `watchlist.manual_additions`
 - Congressional buy → auto-adds to candidate pool via insider_score signal
 
-## 8 Factor Scores (all 0–1 normalised)
+## 10 Factor Scores (all 0–1 normalised)
 
-**v13 change from v12:** scores are now 0–1 (not 0–100 percentile). 0.5 = neutral / missing data.
+**v13:** scores moved from 0–100 to 0–1. 0.5 = neutral / missing data.
+**v14:** `options_score` source changed; `alternative_score` added; `dark_pool_score` added.
 
 ```mermaid
 flowchart LR
@@ -38,13 +41,14 @@ flowchart LR
     TS["technical_score\nRSI vs stock's 1yr history"]
     VS["valuation_score\ntrailing P/E\nvs sector (lower=better)"]
     NS["news_score\nFinBERT 7d aggregate\n+ headline velocity"]
-    OS["options_score\nUnusual Whales\ncall/put ratio + unusual premium\nPlaywright + Barchart fallback"]
-    MAC["macro_score\nFRED yield curve (T10Y2Y)\ncredit spread (BAMLH0A0HYM2)\nVIX term structure"]
-    IS["insider_score\nForm 4 insider buys/sells\n+ Congressional STOCK Act\nrecency-weighted [0.3, 0.8]"]
+    OS["options_score · v14\nyfinance option_chain() EOD\ncall/put ratio · IV skew · unusual vol"]
+    MAC["macro_score\nFRED yield curve (T10Y2Y)\ncredit spread (BAMLH0A0HYM2)"]
+    AS["alternative_score · v14\ncongressional×0.50\n+ insider Form 4×0.35\n+ dark_pool×0.15"]
+    DP["dark_pool_score · v14\nFINRA ATS API\nweekly · percentile rank"]
 
     SC["composite_score\n= Σ score_i × IC[score_i][regime]"]
 
-    MS & QS & TS & VS & NS & OS & MAC & IS --> SC
+    MS & QS & TS & VS & NS & OS & MAC & AS & DP --> SC
 ```
 
 ### Score Details
@@ -56,9 +60,11 @@ flowchart LR
 | `technical_score` | pandas-ta RSI | 0.5 | 0–1 | vs stock's own 1yr RSI history |
 | `valuation_score` | yfinance P/E | 0.5 | 0–1 | Lower P/E = higher score |
 | `news_score` | FinBERT + velocity | 0.5 | 0–1 | 7d aggregate + rate-of-change |
-| `options_score` | Unusual Whales | 0.5 | 0–1 | 0.5 if Playwright fails |
+| `options_score` | yfinance `option_chain()` | 0.5 | 0–1 | **v14**: EOD call/put ratio, IV skew, unusual vol |
 | `macro_score` | FRED API | 0.5 | 0–1 | Shared across all symbols in batch |
-| `insider_score` | Congressional + Form 4 | 0.5 | 0.3–0.8 | 0.5 = no trades |
+| `insider_score` | Congressional (kept for compat) | 0.5 | 0.3–0.8 | v13 key; see `alternative_score` for v14 |
+| `alternative_score` | Congressional + Form 4 + Dark Pool | 0.5 | 0–1 | **v14**: cong×0.50 + insider×0.35 + dark×0.15 |
+| `dark_pool_score` | FINRA ATS API (weekly, free) | 0.5 | 0–1 | **v14**: percentile rank of dark pool % vs universe |
 
 ### IC Weighting
 

@@ -166,3 +166,54 @@ def notify_daily_health(source_statuses: dict, portfolio_summary: dict) -> bool:
         f"<b>Regime:</b> {p.get('regime', 'UNKNOWN')}",
         level="SYSTEM",
     )
+
+
+def notify_daily_digest(
+    regime: str,
+    vix: float,
+    cash_pct: float,
+    actions: list,        # list of {type: "ENTRY"|"EXIT"|"SKIP"|"BLOCKED", symbol, detail}
+    portfolio_nav: float,
+    nav_pct_today: float,
+    spy_today: float,
+    n_positions: int,
+    model_health: dict,   # {model_name: ic}
+    paper_trading: bool = True,
+) -> bool:
+    label = "[PAPER TRADING]" if paper_trading else "[LIVE]"
+    action_lines = []
+    for a in actions[:10]:
+        icon = {"ENTRY": "✅", "EXIT": "✅", "SKIP": "⏭️", "BLOCKED": "🚫"}.get(a.get("type", ""), "•")
+        action_lines.append(f"  {icon} {a.get('type','')} {a.get('symbol','')}: {a.get('detail','')}")
+
+    model_lines = " | ".join(
+        f"{k}: IC={v:.3f}" + (" ✅" if v > 0 else " ❌")
+        for k, v in model_health.items()
+    )
+    alpha_today = nav_pct_today - spy_today
+
+    return notify(
+        f"<b>DAILY DIGEST — {datetime.now().strftime('%Y-%m-%d')} {label}</b>\n\n"
+        f"Regime: {regime}  |  VIX: {vix:.1f}  |  Cash: {cash_pct:.0f}%\n\n"
+        f"<b>Actions today:</b>\n" + "\n".join(action_lines) + "\n\n"
+        f"<b>Open positions:</b> {n_positions}\n"
+        f"<b>Portfolio NAV:</b>  ${portfolio_nav:,.0f} ({nav_pct_today:+.1f}% today)\n"
+        f"<b>SPY today:</b> {spy_today:+.1f}%  →  Our alpha: {alpha_today:+.1f}%\n\n"
+        f"<b>Models:</b> {model_lines}",
+        level="SYSTEM",
+    )
+
+
+def notify_model_rollback(model_name: str, gate_failed: str, ic: float) -> bool:
+    return notify(
+        f"<b>Model rollback: {model_name}</b>\n"
+        f"Gate failed: <b>{gate_failed}</b>\n"
+        f"IC on held-out data: {ic:.4f}\n"
+        f"Reverted to previous model version.\n"
+        f"<i>Action needed: review regime shift or training data quality.</i>",
+        level="CRITICAL",
+    )
+
+
+def notify_failure(source: str, error_type: str, cause: str, affects: str) -> bool:
+    return notify_source_down(source, symbol="*", error=f"{error_type}: {cause[:150]}")

@@ -1,4 +1,4 @@
-# Component Reference (v13)
+# Component Reference (v14)
 
 ## ML / Modeling
 
@@ -22,7 +22,7 @@
 | alpaca-py | Real-time bars + news WebSocket + order execution |
 | fredapi | FRED macro data: yield curve, credit spread, VIX term structure |
 | feedparser | RSS parsing for PRNewswire, BusinessWire, Google News |
-| playwright | Browser automation for Unusual Whales, Earnings Whispers, Seeking Alpha |
+| playwright | Browser automation for Earnings Whispers, Seeking Alpha (Unusual Whales removed in v14) |
 | requests | SEC EDGAR JSON API, CapitolTrades, Senate EFTS |
 | pytrends | Google Trends (retail attention signal) |
 | tradingview-screener | Momentum expansion, daily mover fetch (all US stocks, free) |
@@ -33,13 +33,26 @@
 | vectorbt | Vectorized backtester (intelligent_backtest.py) |
 | scipy | Spearman correlation for IC tracking |
 
-## LLM / AI
+## LLM / AI (v14 — 2 tiers, Haiku removed)
 
 | Library | Model | Role | Cost |
 |---------|-------|------|------|
-| groq | llama-3.3-70b-versatile | Routine verdicts, tranche consensus | Free (14,400 req/day) |
-| anthropic | claude-haiku-4-5-20251001 | Research, exit/dip verdicts, scenarios | ~$0.72/mo |
-| anthropic | claude-sonnet-4-6 | Final synthesis, anomaly detection | ~$2/mo |
+| groq | llama-3.3-70b-versatile | All routine verdicts: tranche, exit, dip, symbol classification | Free (14,400 req/day) |
+| anthropic | claude-sonnet-4-6 | Final synthesis only: anomaly detection, narrative shift | ~$2/mo |
+
+> **v14 change**: Claude Haiku removed — Groq (free) handles all verdict/classification tasks at equivalent quality.
+
+## Structured Logging (v14 — new)
+
+| Component | Role |
+|-----------|------|
+| `data/logging/trade_logger.py` | SQLite WAL + JSONL backup, queue-based writer, 12 stage types |
+| `logs/trade_lifecycle.db` | Primary store: O(1) lookup by trace_id |
+| `logs/structured/trades_YYYYMMDD.jsonl` | Human-readable backup (plain-English why field) |
+| `data/model_tester.py` | 5-gate deployment guard before any model swap |
+| `data/model_health_reporter.py` | Weekly Sunday Telegram digest |
+| `data/notifications/telegram_bot.py` | Interactive bot: /trace /status /positions /health |
+| `data/parallel_runner.py` | Adaptive workers: min(cpu_count, n_symbols) |
 
 ## Backend
 
