@@ -331,7 +331,12 @@ async def main():
     if args.full_universe:
         import json as _json
         cfg = _json.loads(Path("config.json").read_text())
-        symbols = cfg.get("watchlist", {}).get("mandatory", ["NVDA", "AAPL"])
+        wl = cfg.get("watchlist", {})
+        symbols = (
+            wl.get("mandatory", [])
+            + wl.get("screener_picks", [])
+            + wl.get("manual_additions", [])
+        ) or ["NVDA", "AAPL"]
     else:
         symbols = args.symbols
 
