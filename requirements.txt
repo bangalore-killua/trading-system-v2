@@ -78,9 +78,10 @@ lightgbm==4.5.0
 scikit-learn==1.6.0                # scikit-learn org, BSD — stable, won't disappear
 
 # ── Data Processing ───────────────────────────────────────────────────────────
-# pandas, numpy — NumFOCUS, won't disappear
+# pandas, numpy, scipy — NumFOCUS, won't disappear
 pandas==2.3.2
 numpy==2.2.6
+scipy>=1.14.0                      # Spearman IC in signal_audit.py; stats utilities
 pyarrow>=24.0.0                    # Parquet I/O for training_pipeline intermediate files
 
 # ── Performance Reporting ─────────────────────────────────────────────────────

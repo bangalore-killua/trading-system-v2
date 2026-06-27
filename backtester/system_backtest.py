@@ -121,13 +121,15 @@ class SystemBacktest:
         import yfinance as yf  # type: ignore
         import pandas as pd    # type: ignore
 
-        # Download all OHLCV upfront
+        # Download all OHLCV upfront — include 1yr warmup before sim start so
+        # indicators (RSI-14, EMA-200, etc.) are non-NaN on the very first sim day
+        warmup_start = self.start_date - timedelta(days=365)
         price_data: Dict[str, pd.DataFrame] = {}
         bench_data: Optional[pd.DataFrame]  = None
         try:
             raw = yf.download(
                 self.symbols + [BENCH_SYMBOL],
-                start=str(self.start_date),
+                start=str(warmup_start),
                 end=str(self.end_date),
                 auto_adjust=True,
                 progress=False,
@@ -205,8 +207,9 @@ class SystemBacktest:
                     loss  = (-delta.clip(upper=0)).rolling(14).mean()
                     rs    = gain / loss.replace(0, 1e-10)
                     rsi   = float(100 - 100 / (1 + rs.iloc[-1]))
-                    # Simple signal: RSI 30-55 → entry candidate
-                    if 30 <= rsi <= 55:
+                    # Simple signal: RSI 30-55 → entry candidate; dry_run widens to 20-70 so 5 days always produce ≥1 trade
+                    rsi_lo, rsi_hi = (20, 70) if self.dry_run else (30, 55)
+                    if rsi_lo <= rsi <= rsi_hi:
                         size_pct = 5.0
                         qty = (self.portfolio.cash * size_pct / 100) / price
                         if qty >= 1:
@@ -216,6 +219,17 @@ class SystemBacktest:
                                 fill_price = float(price_data[sym].loc[str(next_dates[0]), "Open"])
                                 self.portfolio.open_position(sym, qty, fill_price, day_str,
                                                               {"rsi": rsi, "size_pct": size_pct})
+
+        # Flush still-open positions at last price (so dry-run always has closed trades to report)
+        last_day = all_dates[n_days - 1]
+        for sym in list(self.portfolio.positions.keys()):
+            price = current_prices.get(sym)
+            if price is None:
+                continue
+            spy_price_last = float(bench_data.loc[str(last_day), "Close"]) if bench_data is not None else 1.0
+            spy_slice = bench_data.loc[self.portfolio.positions[sym]["entry_date"]:str(last_day), "Close"] if bench_data is not None else None
+            spy_ret   = float((spy_slice.iloc[-1] / spy_slice.iloc[0]) - 1) if spy_slice is not None and len(spy_slice) > 1 else 0
+            self.portfolio.close_position(sym, price, str(last_day), "sim_end", spy_ret, beta=1.0)
 
         return self._build_report(bench_data)
 
@@ -287,11 +301,11 @@ class SystemBacktest:
         json_path = REPORT_DIR / f"backtest_results_{date_str}.json"
         txt_path  = REPORT_DIR / f"backtest_summary_{date_str}.txt"
         REPORT_DIR.mkdir(exist_ok=True)
-        json_path.write_text(json.dumps(report, indent=2, default=str))
+        json_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
 
         summary_lines = [
-            f"SYSTEM BACKTEST SUMMARY — {date_str}",
-            f"Period: {self.start_date} → {self.end_date}",
+            f"SYSTEM BACKTEST SUMMARY - {date_str}",
+            f"Period: {self.start_date} to {self.end_date}",
             f"Symbols: {len(self.symbols)} | Trades: {len(trades)}",
             f"Win rate: {win_rate:.1%} | Avg alpha: {avg_alpha:+.2%}",
             f"Total return: {total_ret:+.2%} | Sharpe: {sharpe:.2f} | Max DD: {max_dd:.1%}",
@@ -301,7 +315,7 @@ class SystemBacktest:
         for reg, d in regime_summary.items():
             summary_lines.append(f"  {reg:14s}: {d['n_trades']} trades | avg alpha={d['avg_alpha']:+.2%}")
 
-        txt_path.write_text("\n".join(summary_lines))
+        txt_path.write_text("\n".join(summary_lines), encoding="utf-8")
         logger.info("Backtest complete — results: %s | summary: %s", json_path, txt_path)
         return report
 
