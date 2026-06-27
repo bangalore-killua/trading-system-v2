@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run after first deploy to train all 3 AutoGluon models on the server.
+# Run after first deploy to train all 4 AutoGluon models on the server.
 # Models are excluded from git (too large) — must be generated here.
-# Expected runtime: ~3 hours total (1h per model).
+# Expected runtime: ~4 hours total (1h per model).
 
 set -e
 
@@ -17,5 +17,9 @@ echo "=== Training dip model ==="
 python -m strategy.training_pipeline --autogluon --dip-model --years 5
 echo "Dip model done."
 
-echo "=== All models trained. Starting server... ==="
+echo "=== Training tranche model ==="
+python -m strategy.training_pipeline --autogluon --tranche-model --years 5
+echo "Tranche model done."
+
+echo "=== All 4 models trained. Starting server... ==="
 python run_server.py

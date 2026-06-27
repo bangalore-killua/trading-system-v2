@@ -291,10 +291,11 @@ class AutoGluonPipeline:
         # result["ic"] ≤ 0 → stop — no edge found
     """
 
-    ENTRY_MODEL_PATH = "models/autogluon_entry"
-    EXIT_MODEL_PATH  = "models/autogluon_exit"
-    DIP_MODEL_PATH   = "models/autogluon_dip"
-    SCORECARD_PATH   = "models/scorecard_entry_v1.json"
+    ENTRY_MODEL_PATH   = "models/autogluon_entry"
+    EXIT_MODEL_PATH    = "models/autogluon_exit"
+    DIP_MODEL_PATH     = "models/autogluon_dip"
+    TRANCHE_MODEL_PATH = "models/autogluon_tranche"
+    SCORECARD_PATH     = "models/scorecard_entry_v1.json"
 
     def __init__(self, symbols: list, years: int = 5):
         self.symbols = symbols
@@ -394,6 +395,33 @@ class AutoGluonPipeline:
         leaderboard = self._train_autogluon(df, self.DIP_MODEL_PATH, time_limit)
         return {"model_path": self.DIP_MODEL_PATH, "leaderboard": leaderboard, "n_samples": len(df)}
 
+    def run_tranche_model(self, time_limit: int = 3600) -> dict:
+        """Train tranche scale-up model: P(correct_scale_up) vs P(premature_scale_up).
+        Filters to established positions (days_held >= 3, rsi_14 >= 40).
+        Labels by alpha > 0 — was adding T2 to this position correct?
+        ONLY call after run_entry_model() returns IC > 0.
+        """
+        import json, os
+        if not os.path.exists(self.SCORECARD_PATH):
+            raise RuntimeError("run_entry_model() first — no entry model scorecard found")
+
+        with open(self.SCORECARD_PATH) as f:
+            scorecard = json.load(f)
+        if scorecard.get("ic", 0) <= 0:
+            raise RuntimeError(f"Entry model IC={scorecard['ic']} ≤ 0 — stop. Do not build tranche model.")
+
+        logger.info("Building tranche model (entry IC=%.4f > 0 — proceeding)", scorecard["ic"])
+        records = self._collect_records()
+        df = self._records_to_features(records, model_type="tranche")
+
+        if len(df) < 100:
+            logger.warning("Tranche model: only %d samples after filter — need ≥100", len(df))
+            return {"error": "insufficient_data", "n_samples": len(df)}
+
+        logger.info("Tranche model: %d samples (days_held >= 3, rsi_14 >= 40)", len(df))
+        leaderboard = self._train_autogluon(df, self.TRANCHE_MODEL_PATH, time_limit)
+        return {"model_path": self.TRANCHE_MODEL_PATH, "leaderboard": leaderboard, "n_samples": len(df)}
+
     def _collect_records(self) -> list:
         """Run intelligent backtester for all symbols and return combined records."""
         from backtester.intelligent_backtest import run_backtest
@@ -430,6 +458,10 @@ class AutoGluonPipeline:
                 # Dip: 1 = correct_dip_buy (recovered, alpha > 0), 0 = caught_falling_knife
                 alpha = r.get("alpha", 0)
                 row["label"] = int(alpha > 0)
+            elif model_type == "tranche":
+                # Tranche: 1 = adding T2 was correct (alpha > 0), 0 = premature scale-up
+                alpha = r.get("alpha", 0)
+                row["label"] = int(alpha > 0)
             else:
                 # Exit: 1 if alpha > 0 (correct hold) else 0 (should have exited)
                 alpha = r.get("alpha", 0)
@@ -444,6 +476,17 @@ class AutoGluonPipeline:
             before = len(df)
             df = df[df["rsi_14"] < 40].copy()
             logger.info("Dip filter: %d → %d records (rsi_14 < 40)", before, len(df))
+
+        # Tranche model: established positions only (days_held >= 3, rsi_14 >= 40 momentum)
+        if model_type == "tranche":
+            before = len(df)
+            mask = pd.Series([True] * len(df), index=df.index)
+            if "days_held" in df.columns:
+                mask &= df["days_held"] >= 3
+            if "rsi_14" in df.columns:
+                mask &= df["rsi_14"] >= 40
+            df = df[mask].copy()
+            logger.info("Tranche filter: %d → %d records (days_held >= 3, rsi_14 >= 40)", before, len(df))
 
         return df
 
@@ -636,6 +679,7 @@ if __name__ == "__main__":
     parser.add_argument("--autogluon",     action="store_true", help="Use AutoGluon + mlfinlab CPCV")
     parser.add_argument("--exit-model",    action="store_true", help="Build exit model (requires entry IC > 0)")
     parser.add_argument("--dip-model",     action="store_true", help="Build dip model (requires entry IC > 0)")
+    parser.add_argument("--tranche-model", action="store_true", help="Build tranche scale-up model (requires entry IC > 0)")
     parser.add_argument("--dry-run",       action="store_true", help="Smoke test: print config and exit")
     args = parser.parse_args()
 
@@ -653,6 +697,8 @@ if __name__ == "__main__":
             result = pipe.run_exit_model()
         elif args.dip_model:
             result = pipe.run_dip_model()
+        elif args.tranche_model:
+            result = pipe.run_tranche_model()
         else:
             result = pipe.run_entry_model()
         print(f"\nResult: IC={result.get('ic', 'N/A')} | n_samples={result.get('n_samples', 'N/A')}")
