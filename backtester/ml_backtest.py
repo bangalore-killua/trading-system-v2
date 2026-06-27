@@ -419,6 +419,7 @@ class _Portfolio:
         pos = self.positions.pop(sym, None)
         if pos is None:
             return None
+        price = price or pos.entry_price  # guard: fall back to entry if price missing
 
         # Equity P&L
         equity_pnl  = (price - pos.entry_price) * pos.shares
@@ -670,7 +671,7 @@ class MLBacktest:
         last_dt = all_dates[-1]
         spy_ret = self._get_1d_ret(spy_df, last_dt)
         for sym in list(portfolio.positions.keys()):
-            price = prices.get(sym, portfolio.positions[sym].entry_price)
+            price = prices.get(sym) or portfolio.positions[sym].entry_price
             portfolio.exit(sym, price, last_dt.strftime("%Y-%m-%d"),
                            "sim_end", spy_ret, hist_vols.get(sym, 0.20))
 
