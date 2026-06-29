@@ -19,7 +19,7 @@ jobs:
       - name: Install test dependencies
         run: |
           pip install --quiet \
-            pytest pytest-asyncio \
+            pytest pytest-asyncio pytest-timeout \
             pandas numpy scipy \
             colorama
 
