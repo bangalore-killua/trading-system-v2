@@ -203,11 +203,15 @@ def _compute_features(df: pd.DataFrame) -> pd.DataFrame:
 # ── Entry signals ─────────────────────────────────────────────────────────────
 
 def _generate_entry_signals(df: pd.DataFrame) -> pd.Series:
-    """Entry signal for backtest labeling using canonical feature names."""
+    """Entry signal for training data generation — intentionally permissive.
+
+    This is NOT the live entry signal (that lives in scorer.py).
+    Goal is maximum diverse labeled samples for AutoGluon to learn from.
+    Triple-barrier labeling determines which entries were actually profitable.
+    """
     return (
-        (df["rsi"] < 45) &
-        (df["price_above_200ma"] == 1) &
-        (df["macd_bullish"] == 1)
+        (df["rsi"] < 50) &
+        (df["price_above_200ma"] == 1)
     )
 
 
