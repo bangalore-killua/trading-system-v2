@@ -63,8 +63,10 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL   = "llama-3.3-70b-versatile"   # free — all verdicts + routine tasks
-SONNET_MODEL = "claude-sonnet-4-6"          # final synthesis only (~$2/mo)
+GROQ_MODEL    = "llama-3.3-70b-versatile"   # Groq fallback when Ollama unavailable
+MINICPM_MODEL = "minicpm3"                   # Ollama local model (primary, no API cost)
+OLLAMA_URL    = "http://localhost:11434/api/generate"
+SONNET_MODEL  = "claude-sonnet-4-6"          # final synthesis only (~$2/mo)
 
 CONFLICT_LOG_PATH = Path("logs/consensus_conflicts.jsonl")
 
@@ -352,7 +354,7 @@ class ConsensusEngine:
             logger.debug("tranche_verdict Groq call failed: %s", e)
             return {"action": "hold", "reasoning": "unavailable"}
 
-    # ── v13: RAG-enhanced Groq prompt (Fix 1 from audit) ─────────────────────
+    # ── v13: RAG-enhanced verdict (MiniCPM primary, Groq fallback) ──────────
 
     async def _get_groq_verdict(
         self,
@@ -362,19 +364,11 @@ class ConsensusEngine:
         signal_data: dict,
         regime: str,
     ) -> tuple[str, str]:
-        """Ask Groq for a bullish/neutral/bearish verdict on the signal.
+        """Ask local MiniCPM-3-4B (Ollama) for a verdict, fall back to Groq.
 
-        v13 fix: system/user split + company name + headlines + regime-matched RAG.
         Returns (verdict: str, reasoning: str).
         """
-        client = self._get_groq_client()
-        if client is None:
-            return "neutral", ""
-
-        # ── RAG: 3 regime-matched past cases from ChromaDB ────────────────────
-        rag_context = self._fetch_rag_context(signal_data, regime, n=3)
-
-        # ── Build context ─────────────────────────────────────────────────────
+        rag_context  = self._fetch_rag_context(signal_data, regime, n=3)
         company_name = signal_data.get("company_name", symbol)
         headlines    = signal_data.get("headlines", [])
         headline_str = "\n".join(f"  - {h}" for h in headlines[:5]) if headlines else "  (none)"
@@ -401,6 +395,55 @@ class ConsensusEngine:
             f"Verdict: {{\"verdict\": \"bullish|neutral|bearish\", \"reasoning\": \"one sentence\"}}"
         )
 
+        # ── Try Ollama (MiniCPM-3-4B) first ──────────────────────────────────
+        verdict, reasoning = await self._call_ollama(system_prompt, user_prompt, symbol)
+        if verdict is not None:
+            return verdict, reasoning
+
+        # ── Fall back to Groq ─────────────────────────────────────────────────
+        return await self._call_groq_verdict(system_prompt, user_prompt, symbol)
+
+    async def _call_ollama(
+        self, system_prompt: str, user_prompt: str, symbol: str
+    ) -> tuple[Optional[str], str]:
+        """Call local Ollama MiniCPM-3-4B. Returns (verdict, reasoning) or (None, '') on failure."""
+        try:
+            import asyncio
+            import httpx
+
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            payload = {
+                "model":  MINICPM_MODEL,
+                "prompt": full_prompt,
+                "stream": False,
+                "options": {"temperature": 0.0, "num_predict": 150},
+            }
+
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: httpx.post(OLLAMA_URL, json=payload, timeout=15.0),
+            )
+            response.raise_for_status()
+            raw = response.json().get("response", "").strip()
+            raw = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
+            parsed  = json.loads(raw)
+            verdict = parsed.get("verdict", "neutral").lower()
+            if verdict not in ("bullish", "neutral", "bearish"):
+                verdict = "neutral"
+            logger.debug("MiniCPM verdict %s: %s", symbol, verdict)
+            return verdict, parsed.get("reasoning", "")
+        except Exception as e:
+            logger.debug("Ollama/MiniCPM unavailable for %s: %s — falling back to Groq", symbol, e)
+            return None, ""
+
+    async def _call_groq_verdict(
+        self, system_prompt: str, user_prompt: str, symbol: str
+    ) -> tuple[str, str]:
+        """Call Groq as fallback. Returns (verdict, reasoning)."""
+        client = self._get_groq_client()
+        if client is None:
+            return "neutral", ""
         try:
             import asyncio
             loop = asyncio.get_event_loop()
@@ -427,7 +470,7 @@ class ConsensusEngine:
             logger.debug("Groq returned non-JSON for %s", symbol)
             return "neutral", ""
         except Exception:
-            logger.debug("Groq verdict failed for %s", symbol, exc_info=True)
+            logger.debug("Groq verdict fallback failed for %s", symbol, exc_info=True)
             return "neutral", ""
 
     def _fetch_rag_context(self, signal_data: dict, regime: str, n: int = 3) -> str:

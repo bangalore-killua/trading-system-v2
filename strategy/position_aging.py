@@ -20,6 +20,10 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+# Minimum hold before ANY exit signal is acted on — prevents Day-1 churn.
+# This is live-system business logic, not a backtester parameter.
+MIN_HOLD_DAYS: int = 5
+
 # ── Config helpers ────────────────────────────────────────────────────────────
 
 def _load_review_days() -> dict:
@@ -161,6 +165,7 @@ def check_position_aging(symbol: str,
     result = {
         "symbol":                symbol,
         "days_held":             held,
+        "min_hold_passed":       held >= MIN_HOLD_DAYS,
         "requires_review":       requires_review,
         "review_threshold_days": review_days,
         "days_to_next_review":   days_to_next,
