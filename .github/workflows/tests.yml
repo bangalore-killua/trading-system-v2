@@ -21,7 +21,7 @@ jobs:
           pip install --quiet \
             pytest pytest-asyncio pytest-timeout \
             pandas numpy scipy \
-            colorama
+            colorama pytz
 
       - name: Run tests
         run: pytest tests/ -v --timeout=60 -x
