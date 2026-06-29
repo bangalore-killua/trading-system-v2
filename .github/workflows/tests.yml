@@ -23,7 +23,8 @@ jobs:
             pandas numpy scipy scikit-learn lightgbm \
             colorama pytz \
             mplfinance Pillow \
-            python-dotenv yfinance
+            python-dotenv yfinance \
+            pandas-ta
 
       - name: Run tests
         run: pytest tests/ -v --timeout=60
