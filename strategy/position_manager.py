@@ -77,6 +77,7 @@ class PositionManager:
         self._options_stream = None    # OptionDataStreamManager — injected after construction
         self._db = None            # TradingDatabase — injected after construction
         self._exit_monitor = None  # ExitMonitor — lazy-init on first exit evaluation
+        self._dip_detector = None  # DipDetector — lazy-init on first entry evaluation
 
         # Pending news-driven confirms: symbol → asyncio.Event
         self._pending_news_confirms: Dict[str, asyncio.Event] = {}
@@ -108,6 +109,9 @@ class PositionManager:
         if not indicators:
             logger.warning("SKIP %s — indicator computation failed", symbol)
             return False
+
+        # Score DipDetector and inject confidence into indicators for basket evaluation
+        indicators["dip_confidence"] = self._score_dip(symbol, indicators, df)
 
         current_price = indicators.get("price", 0)
         if current_price < self._risk_cfg.get("min_price_usd", 5.0):
@@ -200,6 +204,13 @@ class PositionManager:
 
         # Apply LightGBM multiplier (1.0 full / 0.5 half — never 0.0 here, caught above)
         target_pct = target_pct * size_multiplier
+
+        # Boost SETUP_NEWS_DRIVEN by news_size_multiplier, capped at max_position_pct
+        if str(setup_type) == "SETUP_NEWS_DRIVEN":
+            news_mult = self._sizing_cfg.get("news_size_multiplier", 1.5)
+            max_pct   = self._risk_cfg.get("max_position_pct", 10)
+            target_pct = min(target_pct * news_mult, max_pct)
+            logger.info("NEWS_DRIVEN size boost: %.1f%% (×%.1f, cap=%d%%)", target_pct, news_mult, max_pct)
 
         qty = self._trader.calculate_position_size(
             symbol=symbol,
@@ -560,6 +571,46 @@ class PositionManager:
                 and price > 0
             ):
                 await self._try_covered_call(symbol, price, remaining_qty)
+
+    # ── DipDetector helper ────────────────────────────────────────────────────
+
+    def _score_dip(self, symbol: str, indicators: dict, df: "pd.DataFrame") -> float:
+        """Return DipDetector confidence score in [0, 1]. Returns 0 on any error."""
+        try:
+            if self._dip_detector is None:
+                from strategy.dip_detector import DipDetector
+                self._dip_detector = DipDetector()
+
+            import pandas as pd
+            price    = float(indicators.get("price", df["Close"].iloc[-1]))
+            high_52w = float(df["Close"].rolling(252, min_periods=30).max().iloc[-1])
+            drop_pct = max(0.0, (high_52w - price) / (high_52w + 1e-10))
+
+            regime = "NEUTRAL"
+            if self._regime:
+                r = self._regime.get_current_regime()
+                if r is not None:
+                    regime = str(r)
+
+            features = {
+                "drop_pct_from_high":   drop_pct,
+                "drop_speed_days":      5,
+                "regime":               regime,
+                "finbert_delta":        float(indicators.get("finbert_score", 0.0)),
+                "news_cause":           "unknown",
+                "eps_beat_streak":      0,
+                "institutional_change": 0,
+                "insider_post_drop":    int(bool(indicators.get("insider_buying_30d", False))),
+                "quality_score":        float(indicators.get("quality_score", 0.5)),
+                "pre_drop_rsi":         float(indicators.get("rsi", 50.0)),
+                "options_flow_score":   float(indicators.get("options_flow_score", 0.0)),
+                "macro_score":          0.0,
+            }
+            result = self._dip_detector.score(symbol, features)
+            return float(result.get("dip_score", 0.0))
+        except Exception:
+            logger.debug("DipDetector failed for %s — using 0", symbol, exc_info=True)
+            return 0.0
 
     # ── Position sizing helpers ──────────────────────────────────────────────
 

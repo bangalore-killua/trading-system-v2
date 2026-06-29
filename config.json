@@ -136,7 +136,8 @@
       "sector_positive_news": 10,
       "sector_inflow": 10,
       "stabilisation_4of7": 25,
-      "stabilisation_6of7": 35
+      "stabilisation_6of7": 35,
+      "dip_detector_bullish": 20
     },
     "exit_weights": {
       "rsi_momentum_lost_2bars": 20,
