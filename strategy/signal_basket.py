@@ -69,11 +69,13 @@ def _eval_entry_signal(name: str, data: dict) -> bool:
     # Map of signal name → evaluation logic
     _evals = {
         "rsi_momentum_zone":    50 <= rsi <= 68,
-        "rsi_oversold":         rsi < 35,
+        # rsi_oversold and volume_confirming use percentile flags computed in feature_builder
+        # (bottom 20% of 252-day RSI / top 30% of 60-day volume) rather than absolute values
+        "rsi_oversold":         bool(data.get("rsi_oversold", 0)),
         "price_above_20ma":     data.get("price_above_20ma", False),
         "price_above_50ma":     data.get("price_above_50ma", False),
         "macd_bullish":         data.get("macd_bullish", False),
-        "volume_confirming":    vol_ratio >= 1.2,
+        "volume_confirming":    bool(data.get("volume_confirming", 0)),
         "atr_not_extreme":      atr_pct < 3.0,
         "score_above_52pct":    score_pct >= 0.52,
         "score_above_60pct":    score_pct >= 0.60,
@@ -95,6 +97,8 @@ def _eval_entry_signal(name: str, data: dict) -> bool:
         "stabilisation_6of7":   stab >= 6,
         "peers_not_singled_out":not data.get("sector_wide_negative", False),
         "no_negative_news_48h": not neg_news_48h,
+        # DipDetector specialist model confidence — set by position_manager before basket call
+        "dip_detector_bullish": float(data.get("dip_confidence", 0.0)) >= 0.65,
     }
     return _evals.get(name, False)
 
@@ -165,8 +169,8 @@ def detect_primary_setup(data: dict) -> str:
     if signal_type == "CYCLICAL_INFLECTION":
         return "SETUP_INFLECTION"
 
-    # Priority 3: BOUNCE — oversold + stabilisation
-    if rsi < 35 and stabilisation >= 4:
+    # Priority 3: BOUNCE — oversold (percentile flag) + stabilisation
+    if (data.get("rsi_oversold", 0) or rsi < 35) and stabilisation >= 4:
         return "SETUP_BOUNCE"
 
     # Priority 4: MOMENTUM — above-threshold score + RSI in zone + bullish trend

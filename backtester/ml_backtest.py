@@ -80,7 +80,9 @@ ENTRY_THRESH   = float(_cfg.get("backtest", {}).get("entry_thresh", 0.60))
 EXIT_THRESH    = float(_cfg.get("backtest", {}).get("exit_thresh", 0.65))
 MAX_HOLD_DAYS  = int(_cfg.get("backtest", {}).get("max_hold_days", 40))
 STOP_LOSS_PCT  = float(_cfg.get("backtest", {}).get("stop_loss_pct", 0.08))
-POS_SIZE_MAX   = float(_cfg.get("risk", {}).get("max_position_pct", 10)) / 100
+POS_SIZE_MAX     = float(_cfg.get("risk", {}).get("max_position_pct", 10)) / 100
+EMERGENCY_FLOOR  = float(_cfg.get("risk", {}).get("emergency_cash_floor_pct", 7)) / 100
+SAFETY_CAP       = int(_cfg.get("risk", {}).get("max_positions_safety_cap", 50))
 OPTION_THRESH  = float(_cfg.get("options", {}).get("long_call_min_lgbm_confidence", 0.82))
 OPTION_BUDGET  = float(_cfg.get("options", {}).get("long_call_budget_pct", 0.40))
 
@@ -158,6 +160,8 @@ class _Portfolio:
     ) -> None:
         if sym in self.positions:
             return
+        if len(self.positions) >= SAFETY_CAP:
+            return
         pos_frac = min(POS_SIZE_MAX, max(0.03, entry_P * 0.12))
         budget   = portfolio_val * pos_frac
 
@@ -170,7 +174,8 @@ class _Portfolio:
             opt_budget = 0.0
 
         shares = int(eq_budget / price)
-        if shares < 1 or eq_budget > self.cash:
+        floor_cash = self.initial * EMERGENCY_FLOOR
+        if shares < 1 or eq_budget > self.cash or self.cash - eq_budget < floor_cash:
             return
 
         cost = shares * price

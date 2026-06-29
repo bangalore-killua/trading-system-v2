@@ -76,6 +76,8 @@ class PositionManager:
         self._options_selector = None  # OptionsSelector — injected after construction
         self._options_stream = None    # OptionDataStreamManager — injected after construction
         self._db = None            # TradingDatabase — injected after construction
+        self._exit_monitor = None  # ExitMonitor — lazy-init on first exit evaluation
+        self._dip_detector = None  # DipDetector — lazy-init on first entry evaluation
 
         # Pending news-driven confirms: symbol → asyncio.Event
         self._pending_news_confirms: Dict[str, asyncio.Event] = {}
@@ -90,10 +92,10 @@ class PositionManager:
             logger.debug("SKIP %s — already in position", symbol)
             return False
 
-        # Skip if at max portfolio positions
-        max_pos = self._risk_cfg.get("max_portfolio_positions", 15)
-        if len(self._state.get_all_positions()) >= max_pos:
-            logger.info("SKIP %s — at max positions (%d)", symbol, max_pos)
+        # Skip if at safety-cap (bug guard — cash floor is the real practical limiter)
+        safety_cap = self._risk_cfg.get("max_positions_safety_cap", 50)
+        if len(self._state.get_all_positions()) >= safety_cap:
+            logger.info("SKIP %s — at safety cap (%d positions)", symbol, safety_cap)
             return False
 
         # Fetch OHLCV (last 250 bars for indicator warm-up)
@@ -107,6 +109,9 @@ class PositionManager:
         if not indicators:
             logger.warning("SKIP %s — indicator computation failed", symbol)
             return False
+
+        # Score DipDetector and inject confidence into indicators for basket evaluation
+        indicators["dip_confidence"] = self._score_dip(symbol, indicators, df)
 
         current_price = indicators.get("price", 0)
         if current_price < self._risk_cfg.get("min_price_usd", 5.0):
@@ -189,16 +194,23 @@ class PositionManager:
         # ── Step 5b: Calculate position size ───────────────────────────────
         atr = indicators.get("atr")
         portfolio_value = await self._get_portfolio_value()
-        target_pct = self._sizing_cfg.get("base_size_pct", 5.0)
+        target_pct = self._get_effective_position_pct(portfolio_value) * 100
 
         # Reduce size in NEUTRAL regime
         regime = self._regime.get_current_regime() if self._regime else None
         if regime and str(regime) in self._cfg.get("regime", {}).get("regimes_reduced_size", []):
-            target_pct = self._sizing_cfg.get("reduced_size_pct", 2.5)
+            target_pct = self._sizing_cfg.get("reduced_size_pct", 1)
             logger.info("Reduced position size due to NEUTRAL regime")
 
         # Apply LightGBM multiplier (1.0 full / 0.5 half — never 0.0 here, caught above)
         target_pct = target_pct * size_multiplier
+
+        # Boost SETUP_NEWS_DRIVEN by news_size_multiplier, capped at max_position_pct
+        if str(setup_type) == "SETUP_NEWS_DRIVEN":
+            news_mult = self._sizing_cfg.get("news_size_multiplier", 1.5)
+            max_pct   = self._risk_cfg.get("max_position_pct", 10)
+            target_pct = min(target_pct * news_mult, max_pct)
+            logger.info("NEWS_DRIVEN size boost: %.1f%% (×%.1f, cap=%d%%)", target_pct, news_mult, max_pct)
 
         qty = self._trader.calculate_position_size(
             symbol=symbol,
@@ -355,6 +367,27 @@ class PositionManager:
 
         indicators = self._ta.compute_indicators(df)
         if not indicators:
+            return
+
+        # Priority 2.5: ExitMonitor LSTM peak detection
+        # Falls back to RSI rule-based scoring if model file is not yet trained.
+        if self._exit_monitor is None:
+            from strategy.exit_monitor import ExitMonitor
+            self._exit_monitor = ExitMonitor()
+
+        em = self._exit_monitor.score(symbol, df, {
+            "unrealized_pnl_pct":        pos_info.get("unrealized_pnl_pct", 0.0),
+            "peak_drawdown_pct":          pos_info.get("peak_drawdown_pct", 0.0),
+            "days_held":                  pos_info.get("days_held", 0),
+            "entry_composite_score":      pos_info.get("entry_score", 0.5),
+            "regime_changed_since_entry": pos_info.get("regime_changed", False),
+        })
+        if em["exit_action"] == "E3":
+            await self._execute_exit(symbol, pos_info, reason=f"exit_monitor_E3:{em['peak_prob']:.3f}")
+            return
+        if em["exit_action"] in ("E2", "E1"):
+            partial_pct = 50.0 if em["exit_action"] == "E2" else 20.0
+            await self._execute_partial_exit(symbol, pos_info, partial_pct, indicators.get("price", 0))
             return
 
         # Priority 3: Exit basket
@@ -539,6 +572,60 @@ class PositionManager:
             ):
                 await self._try_covered_call(symbol, price, remaining_qty)
 
+    # ── DipDetector helper ────────────────────────────────────────────────────
+
+    def _score_dip(self, symbol: str, indicators: dict, df: "pd.DataFrame") -> float:
+        """Return DipDetector confidence score in [0, 1]. Returns 0 on any error."""
+        try:
+            if self._dip_detector is None:
+                from strategy.dip_detector import DipDetector
+                self._dip_detector = DipDetector()
+
+            import pandas as pd
+            price    = float(indicators.get("price", df["Close"].iloc[-1]))
+            high_52w = float(df["Close"].rolling(252, min_periods=30).max().iloc[-1])
+            drop_pct = max(0.0, (high_52w - price) / (high_52w + 1e-10))
+
+            regime = "NEUTRAL"
+            if self._regime:
+                r = self._regime.get_current_regime()
+                if r is not None:
+                    regime = str(r)
+
+            features = {
+                "drop_pct_from_high":   drop_pct,
+                "drop_speed_days":      5,
+                "regime":               regime,
+                "finbert_delta":        float(indicators.get("finbert_score", 0.0)),
+                "news_cause":           "unknown",
+                "eps_beat_streak":      0,
+                "institutional_change": 0,
+                "insider_post_drop":    int(bool(indicators.get("insider_buying_30d", False))),
+                "quality_score":        float(indicators.get("quality_score", 0.5)),
+                "pre_drop_rsi":         float(indicators.get("rsi", 50.0)),
+                "options_flow_score":   float(indicators.get("options_flow_score", 0.0)),
+                "macro_score":          0.0,
+            }
+            result = self._dip_detector.score(symbol, features)
+            return float(result.get("dip_score", 0.0))
+        except Exception:
+            logger.debug("DipDetector failed for %s — using 0", symbol, exc_info=True)
+            return 0.0
+
+    # ── Position sizing helpers ──────────────────────────────────────────────
+
+    def _get_effective_position_pct(self, portfolio_value: float) -> float:
+        """Returns effective position size as a fraction of portfolio.
+
+        At small corpus min_position_usd dominates (e.g. $300/$1k = 30%).
+        At large corpus base_size_pct dominates (e.g. 5% of $100k = $5k).
+        """
+        base_pct = self._sizing_cfg.get("base_size_pct", 5) / 100
+        min_usd  = self._sizing_cfg.get("min_position_usd", 300)
+        if portfolio_value <= 0:
+            return base_pct
+        return max(min_usd / portfolio_value, base_pct)
+
     # ── Risk checks ─────────────────────────────────────────────────────────
 
     async def _check_risk(
@@ -553,14 +640,14 @@ class PositionManager:
             if regime in no_new_longs:
                 return False, f"regime={regime}"
 
-        # 2. Cash reserve
+        # 2. Emergency cash floor (T+2 settlement buffer — only hard floor)
         account = self._trader.get_account()
         portfolio_value = float(getattr(account, "portfolio_value", 0) or 0)
         cash = float(getattr(account, "cash", 0) or 0)
         cash_pct = (cash / portfolio_value * 100) if portfolio_value > 0 else 0
-        min_cash = self._risk_cfg.get("cash_reserve_pct", 20)
-        if cash_pct < min_cash:
-            return False, f"cash_reserve={cash_pct:.1f}%<{min_cash}%"
+        floor_pct = self._risk_cfg.get("emergency_cash_floor_pct", 7)
+        if cash_pct < floor_pct:
+            return False, f"cash_floor={cash_pct:.1f}%<{floor_pct}%"
 
         # 3. Sector concentration
         if self._corr:
@@ -1071,12 +1158,13 @@ class PositionManager:
             )
             logger.warning("CIRCUIT: %d consecutive losses — pausing", consec)
 
-        # ── Cash < 10% ─────────────────────────────────────────────────────────
-        if cash_pct < 0.10:
+        # ── Cash below emergency floor ──────────────────────────────────────────
+        _floor = self._risk_cfg.get("emergency_cash_floor_pct", 7) / 100
+        if cash_pct < _floor:
             status["entries_paused"]    = True
-            status["pause_reason"]      = f"cash={cash_pct*100:.1f}%<10%"
+            status["pause_reason"]      = f"cash={cash_pct*100:.1f}%<{_floor*100:.0f}%"
             status["circuit_triggered"] = True
-            logger.warning("CIRCUIT: cash %.1f%% < 10%% — blocking new entries", cash_pct * 100)
+            logger.warning("CIRCUIT: cash %.1f%% < %.0f%% floor — blocking new entries", cash_pct * 100, _floor * 100)
 
         return status
 

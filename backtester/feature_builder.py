@@ -134,6 +134,20 @@ def _adx_simple(high: pd.Series, low: pd.Series, close: pd.Series, period: int =
     return dx.ewm(com=period - 1, adjust=False).mean()
 
 
+def _rolling_pct_fast(series: pd.Series, window: int) -> pd.Series:
+    """Rolling percentile approximation via min-max normalisation.
+
+    Returns values in [0, 1]: 0 = at rolling minimum, 1 = at rolling maximum.
+    Uses pure rolling min/max — O(n) and fully vectorised.
+    min_periods = window // 4 so early bars still get a value.
+    """
+    min_p = max(1, window // 4)
+    r_min = series.rolling(window, min_periods=min_p).min()
+    r_max = series.rolling(window, min_periods=min_p).max()
+    span  = (r_max - r_min).replace(0, np.nan)
+    return ((series - r_min) / span).fillna(0.5)
+
+
 def _build_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Compute all technical features and add as columns.
 
@@ -179,31 +193,96 @@ def _build_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["price_above_20ma"]    = (c > sma20).astype(int)
     df["price_above_50ma"]    = (c > sma50).astype(int)
     df["price_above_200ma"]   = (c > sma200).astype(int)
-    df["rsi_oversold"]        = (rsi14 < 30).astype(int)
-    df["rsi_overbought"]      = (rsi14 > 70).astype(int)
-    df["rsi_momentum_zone"]   = ((rsi14 >= 40) & (rsi14 <= 60)).astype(int)
+
+    # Percentile-ranked binary flags — self-adjusting across regimes
+    # RSI: 252-day window (one trading year of context)
+    rsi_pct   = _rolling_pct_fast(rsi14,           252)
+    # Volume / ADX / Stochastic: 60-day window (one trading quarter)
+    vol_pct   = _rolling_pct_fast(df["volume_ratio"], 60)
+    adx_pct   = _rolling_pct_fast(adx,              60)
+    stoch_pct = _rolling_pct_fast(stoch_k,           60)
+
+    df["rsi_oversold"]        = (rsi_pct < 0.20).astype(int)   # bottom 20% of yearly history
+    df["rsi_overbought"]      = (rsi_pct > 0.80).astype(int)   # top 20% of yearly history
+    df["rsi_momentum_zone"]   = ((rsi14 >= 40) & (rsi14 <= 60)).astype(int)  # absolute zone kept
     df["macd_bullish"]        = (macd_line > macd_sig).astype(int)
     df["macd_bullish_cross"]  = ((macd_line > macd_sig) & (macd_line.shift() <= macd_sig.shift())).astype(int)
     df["macd_bearish_cross"]  = ((macd_line < macd_sig) & (macd_line.shift() >= macd_sig.shift())).astype(int)
-    df["volume_surge"]        = (df["volume_ratio"] > 2.0).astype(int)
-    df["volume_confirming"]   = ((df["volume_ratio"] > 1.3) & (c > c.shift())).astype(int)
-    df["volume_distribution"] = ((df["volume_ratio"] > 1.3) & (c < c.shift())).astype(int)
+    df["volume_surge"]        = (vol_pct > 0.85).astype(int)   # top 15% of quarterly volume
+    df["volume_confirming"]   = ((vol_pct > 0.70) & (c > c.shift())).astype(int)
+    df["volume_distribution"] = ((vol_pct > 0.70) & (c < c.shift())).astype(int)
     df["bb_squeeze"]          = (bb_width < bb_width.rolling(20).mean() * 0.7).astype(int)
-    df["adx_strong_trend"]    = (adx > 25).astype(int)
+    df["adx_strong_trend"]    = (adx_pct > 0.60).astype(int)   # top 40% of quarterly ADX
     df["daily_trend_bullish"] = (c > c.shift()).astype(int)
-    df["stoch_oversold"]      = (stoch_k < 20).astype(int)
-    df["stoch_overbought"]    = (stoch_k > 80).astype(int)
+    df["stoch_oversold"]      = (stoch_pct < 0.15).astype(int) # bottom 15% of quarterly stoch
+    df["stoch_overbought"]    = (stoch_pct > 0.85).astype(int) # top 15% of quarterly stoch
     df["gap_up"]              = (df["Open"] > c.shift() * 1.01).astype(int)
     df["gap_down"]            = (df["Open"] < c.shift() * 0.99).astype(int)
 
-    body       = (c - df["Open"]).abs()
+    o          = df["Open"]
+    body       = (c - o).abs()
     candle_rng = h - l
     df["body_size"]           = body / c.replace(0, np.nan)
-    df["body_direction"]      = np.sign(c - df["Open"])
-    df["upper_wick"]          = (h - c.clip(lower=df["Open"])) / c.replace(0, np.nan)
-    df["lower_wick"]          = (c.clip(upper=df["Open"]) - l) / c.replace(0, np.nan)
+    df["body_direction"]      = np.sign(c - o)
+    df["upper_wick"]          = (h - c.clip(lower=o)) / c.replace(0, np.nan)
+    df["lower_wick"]          = (c.clip(upper=o) - l) / c.replace(0, np.nan)
     df["wick_ratio"]          = (h - l - body) / body.replace(0, np.nan)
     df["candle_range_vs_atr"] = candle_rng / atr14.replace(0, np.nan)
+
+    # ── Candlestick pattern features (pandas OHLCV rules, no TA-Lib) ─────────
+    # The live system uses YOLOv8 chart-pattern detection; the backtester uses
+    # these rule-based approximations instead. Retrain models periodically once
+    # enough live-labelled candle data accumulates.
+    sma50      = c.rolling(50, min_periods=10).mean()
+    raw_rng    = candle_rng.replace(0, np.nan)
+    low_wick_r = o.clip(upper=c) - l          # lower boundary of real body → low
+    up_wick_r  = h - o.clip(lower=c)          # high → upper boundary of real body
+
+    _hammer = (
+        (body / raw_rng < 0.35) &
+        (low_wick_r > body * 2.0) &
+        (up_wick_r  < raw_rng * 0.15)
+    )
+    df["hammer_at_200ma"] = (
+        _hammer & ((c - sma200).abs() / sma200.replace(0, np.nan) < 0.03)
+    ).fillna(False).astype(int)
+    df["hammer_at_50ma"] = (
+        _hammer & ((c - sma50).abs() / sma50.replace(0, np.nan) < 0.03)
+    ).fillna(False).astype(int)
+
+    _prior_bear = c.shift(1) < o.shift(1)
+    _curr_bull  = c > o
+    _engulf     = (
+        (o <= c.shift(1)) & (c >= o.shift(1)) &
+        (body > (o.shift(1) - c.shift(1)).abs())
+    )
+    _at_sup_20  = c < c.rolling(20, min_periods=5).min().shift(1) * 1.05
+    df["engulfing_at_support"] = (
+        _prior_bear & _curr_bull & _engulf & _at_sup_20
+    ).fillna(False).astype(int)
+
+    df["marubozu_on_volume_surge"] = (
+        (body / raw_rng > 0.85) & (df["volume_ratio"] > 2.0)
+    ).fillna(False).astype(int)
+
+    _d1_bear_big = (o.shift(2) > c.shift(2)) & (
+        (o.shift(2) - c.shift(2)) > (h.shift(2) - l.shift(2)) * 0.50
+    )
+    _d2_small   = (c.shift(1) - o.shift(1)).abs() < (h.shift(1) - l.shift(1)) * 0.30
+    _d3_bull_mid = (c > o) & (c > (o.shift(2) + c.shift(2)) / 2)
+    df["morning_star_at_support"] = (
+        _d1_bear_big & _d2_small & _d3_bull_mid &
+        (c < c.rolling(20, min_periods=5).min().shift(1) * 1.07)
+    ).fillna(False).astype(int)
+
+    _d1_bull_big = (c.shift(2) > o.shift(2)) & (
+        (c.shift(2) - o.shift(2)) > (h.shift(2) - l.shift(2)) * 0.50
+    )
+    _d3_bear_big = (o > c) & ((o - c) > raw_rng * 0.50)
+    df["evening_star_near_highs"] = (
+        _d1_bull_big & _d2_small & _d3_bear_big &
+        (c > c.rolling(252, min_periods=50).max().shift(1) * 0.95)
+    ).fillna(False).astype(int)
 
     return df
 
@@ -267,7 +346,7 @@ def _build_feature_row(
     """
     f: dict = {}
 
-    # Technical continuous + binary
+    # Technical continuous + binary (including pandas-computed candlestick patterns)
     for col in (
         "rsi", "macd_hist", "macd_line", "macd_signal",
         "price_vs_20ma", "price_vs_50ma", "price_vs_200ma",
@@ -281,17 +360,11 @@ def _build_feature_row(
         "stoch_oversold", "stoch_overbought", "gap_up", "gap_down",
         "body_size", "body_direction", "upper_wick", "lower_wick",
         "wick_ratio", "candle_range_vs_atr",
+        "hammer_at_200ma", "hammer_at_50ma", "engulfing_at_support",
+        "marubozu_on_volume_surge", "morning_star_at_support", "evening_star_near_highs",
     ):
         val = row.get(col)
         f[col] = None if (val is None or (isinstance(val, float) and np.isnan(val))) else val
-
-    # Candlestick patterns — no TA-Lib in backtester, fixed to 0
-    f["hammer_at_200ma"]          = 0
-    f["hammer_at_50ma"]           = 0
-    f["engulfing_at_support"]     = 0
-    f["marubozu_on_volume_surge"] = 0
-    f["morning_star_at_support"]  = 0
-    f["evening_star_near_highs"]  = 0
 
     # Fundamentals
     f["pe_ratio"]             = fund.get("pe_ratio")

@@ -54,10 +54,20 @@ REGIME_WINDOWS = {
     "sideways": ("2024-07-01", "2025-12-31"),
 }
 
-# ── Triple-barrier defaults ────────────────────────────────────────────────────
-TAKE_PROFIT_ATR_MULT = 2.0
-STOP_LOSS_ATR_MULT   = 1.5
-MAX_HOLDING_DAYS     = 60
+# ── Triple-barrier defaults — read from config so training matches live params ─
+def _load_triple_barrier_cfg() -> tuple:
+    try:
+        from strategy.config_loader import load_config
+        m = load_config().get("model", {})
+        return (
+            float(m.get("triple_barrier_atr_tp_multiplier", 2.0)),
+            float(m.get("triple_barrier_atr_sl_multiplier", 1.5)),
+            int(m.get("triple_barrier_days", 60)),
+        )
+    except Exception:
+        return 2.0, 1.5, 60
+
+TAKE_PROFIT_ATR_MULT, STOP_LOSS_ATR_MULT, MAX_HOLDING_DAYS = _load_triple_barrier_cfg()
 
 
 def run_backtest(
@@ -289,7 +299,11 @@ def _label_single_trade(
     trade_return = (exit_price - entry_price) / entry_price
     spy_return   = _spy_return_over_period(spy_ind, entry_date, exit_date)
     alpha        = trade_return - (spy_return * beta)
-    entry_label  = 1 if alpha > 0.005 else (-1 if alpha < -0.005 else 0)
+    # σ-scaled threshold: meaningful alpha = 30% of the stock's own daily volatility
+    # e.g. NVDA (σ≈2%/d) → thresh≈0.6%; AAPL (σ≈1%/d) → thresh≈0.3%
+    hist_sigma   = float(df["Close"].pct_change().std()) if len(df) > 20 else 0.015
+    sigma_thresh = hist_sigma * 0.3
+    entry_label  = 1 if alpha > sigma_thresh else (-1 if alpha < -sigma_thresh else 0)
 
     # ── Build full canonical feature vector (same 65 features as live) ────────
     row     = df.iloc[idx]
