@@ -526,7 +526,7 @@ class AutoGluonPipeline:
     def _validate_timeseries(self, df: pd.DataFrame) -> float:
         """TimeSeriesSplit fallback for IC computation (less honest than CPCV)."""
         from sklearn.model_selection import TimeSeriesSplit
-        from sklearn.ensemble import GradientBoostingClassifier
+        from sklearn.ensemble import HistGradientBoostingClassifier
         from sklearn.preprocessing import LabelEncoder
         from scipy.stats import spearmanr
 
@@ -547,7 +547,8 @@ class AutoGluonPipeline:
         for train_idx, test_idx in tscv.split(X):
             x_tr, x_te = X[train_idx], X[test_idx]
             y_tr, y_te = y[train_idx], y[test_idx]
-            clf = GradientBoostingClassifier(n_estimators=100, max_depth=4, random_state=42)
+            # HistGradientBoostingClassifier handles NaN natively (no imputation needed)
+            clf = HistGradientBoostingClassifier(max_iter=100, max_depth=4, random_state=42)
             clf.fit(x_tr, y_tr)
             preds = clf.predict_proba(x_te)[:, 1]
             all_preds.extend(preds)
