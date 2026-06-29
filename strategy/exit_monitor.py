@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 EXIT_MODEL_PATH = "models/exit_lstm_v1.pt"
 
 SEQUENCE_LEN = 30
-FEATURES     = ["rsi_14", "macd", "vol_ratio", "momentum", "price_return"]
+FEATURES     = ["rsi", "macd_hist", "volume_ratio", "momentum", "price_return"]
 
 E1_THRESHOLD = 0.65  # partial exit (20-50%)
 E2_THRESHOLD = 0.78  # partial exit (30-80% of remaining)
@@ -152,6 +152,8 @@ class ExitMonitor:
         if len(df) < SEQUENCE_LEN + 26:
             return None
 
+        # Normalise column casing — handle both Title Case (yfinance) and lowercase
+        df = df.rename(columns={c: c.lower() for c in df.columns})
         close  = df["close"]
         volume = df["volume"]
 
@@ -176,6 +178,7 @@ class ExitMonitor:
         if len(df) < 30:
             return 0.3  # assume not a peak by default
 
+        df    = df.rename(columns={c: c.lower() for c in df.columns})
         close  = df["close"]
         rsi    = _rsi(close, 14).iloc[-1]
         mom_20 = close.pct_change(20).iloc[-1]

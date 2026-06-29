@@ -300,20 +300,6 @@ def check_tier_degradation(symbol: str,
     }
 
 
-def get_sell_threshold(tier_id: str) -> float:
-    """Returns the normalised score sell threshold for a tier."""
-    return TIER_CONFIG.get(
-        tier_id, TIER_CONFIG["tier3"]
-    )["sell_threshold"]
-
-
-def get_stop_style(tier_id: str) -> str:
-    """Returns stop loss style for a tier: fundamental/price_pct/atr"""
-    return TIER_CONFIG.get(
-        tier_id, TIER_CONFIG["tier3"]
-    )["stop_style"]
-
-
 def get_tier_label(tier_id: str) -> str:
     """Returns human-readable tier label."""
     cfg = TIER_CONFIG.get(tier_id, TIER_CONFIG["tier3"])

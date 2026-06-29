@@ -76,6 +76,7 @@ class PositionManager:
         self._options_selector = None  # OptionsSelector — injected after construction
         self._options_stream = None    # OptionDataStreamManager — injected after construction
         self._db = None            # TradingDatabase — injected after construction
+        self._exit_monitor = None  # ExitMonitor — lazy-init on first exit evaluation
 
         # Pending news-driven confirms: symbol → asyncio.Event
         self._pending_news_confirms: Dict[str, asyncio.Event] = {}
@@ -189,12 +190,12 @@ class PositionManager:
         # ── Step 5b: Calculate position size ───────────────────────────────
         atr = indicators.get("atr")
         portfolio_value = await self._get_portfolio_value()
-        target_pct = self._sizing_cfg.get("base_size_pct", 5.0)
+        target_pct = self._sizing_cfg.get("base_size_pct", 2)
 
         # Reduce size in NEUTRAL regime
         regime = self._regime.get_current_regime() if self._regime else None
         if regime and str(regime) in self._cfg.get("regime", {}).get("regimes_reduced_size", []):
-            target_pct = self._sizing_cfg.get("reduced_size_pct", 2.5)
+            target_pct = self._sizing_cfg.get("reduced_size_pct", 1)
             logger.info("Reduced position size due to NEUTRAL regime")
 
         # Apply LightGBM multiplier (1.0 full / 0.5 half — never 0.0 here, caught above)
@@ -355,6 +356,27 @@ class PositionManager:
 
         indicators = self._ta.compute_indicators(df)
         if not indicators:
+            return
+
+        # Priority 2.5: ExitMonitor LSTM peak detection
+        # Falls back to RSI rule-based scoring if model file is not yet trained.
+        if self._exit_monitor is None:
+            from strategy.exit_monitor import ExitMonitor
+            self._exit_monitor = ExitMonitor()
+
+        em = self._exit_monitor.score(symbol, df, {
+            "unrealized_pnl_pct":        pos_info.get("unrealized_pnl_pct", 0.0),
+            "peak_drawdown_pct":          pos_info.get("peak_drawdown_pct", 0.0),
+            "days_held":                  pos_info.get("days_held", 0),
+            "entry_composite_score":      pos_info.get("entry_score", 0.5),
+            "regime_changed_since_entry": pos_info.get("regime_changed", False),
+        })
+        if em["exit_action"] == "E3":
+            await self._execute_exit(symbol, pos_info, reason=f"exit_monitor_E3:{em['peak_prob']:.3f}")
+            return
+        if em["exit_action"] in ("E2", "E1"):
+            partial_pct = 50.0 if em["exit_action"] == "E2" else 20.0
+            await self._execute_partial_exit(symbol, pos_info, partial_pct, indicators.get("price", 0))
             return
 
         # Priority 3: Exit basket
@@ -558,7 +580,7 @@ class PositionManager:
         portfolio_value = float(getattr(account, "portfolio_value", 0) or 0)
         cash = float(getattr(account, "cash", 0) or 0)
         cash_pct = (cash / portfolio_value * 100) if portfolio_value > 0 else 0
-        min_cash = self._risk_cfg.get("cash_reserve_pct", 20)
+        min_cash = self._risk_cfg.get("cash_reserve_pct", 30)
         if cash_pct < min_cash:
             return False, f"cash_reserve={cash_pct:.1f}%<{min_cash}%"
 

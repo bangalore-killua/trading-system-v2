@@ -54,10 +54,20 @@ REGIME_WINDOWS = {
     "sideways": ("2024-07-01", "2025-12-31"),
 }
 
-# ── Triple-barrier defaults ────────────────────────────────────────────────────
-TAKE_PROFIT_ATR_MULT = 2.0
-STOP_LOSS_ATR_MULT   = 1.5
-MAX_HOLDING_DAYS     = 60
+# ── Triple-barrier defaults — read from config so training matches live params ─
+def _load_triple_barrier_cfg() -> tuple:
+    try:
+        from strategy.config_loader import load_config
+        m = load_config().get("model", {})
+        return (
+            float(m.get("triple_barrier_atr_tp_multiplier", 2.0)),
+            float(m.get("triple_barrier_atr_sl_multiplier", 1.5)),
+            int(m.get("triple_barrier_days", 60)),
+        )
+    except Exception:
+        return 2.0, 1.5, 60
+
+TAKE_PROFIT_ATR_MULT, STOP_LOSS_ATR_MULT, MAX_HOLDING_DAYS = _load_triple_barrier_cfg()
 
 
 def run_backtest(
