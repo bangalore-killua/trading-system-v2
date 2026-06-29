@@ -69,17 +69,20 @@ from backtester.feature_builder import (
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s")
 
-# ── Constants ──────────────────────────────────────────────────────────────────
+# ── Constants — loaded from config.json so backtester mirrors live settings ────
+
+from strategy.config_loader import load_config as _load_cfg
+_cfg = _load_cfg()
 
 BENCH_SYMBOL   = "SPY"
-RISK_FREE_RATE = 0.045           # approximate 10Y yield used for B-S pricing
-ENTRY_THRESH   = 0.60            # model P(win) to trigger entry
-EXIT_THRESH    = 0.65            # model P(exit) to trigger full sell
-MAX_HOLD_DAYS  = 40              # forced exit if model never fires
-STOP_LOSS_PCT  = 0.08            # hard stop -8%
-POS_SIZE_MAX   = 0.10            # max 10% of portfolio per position
-OPTION_THRESH  = 0.82            # min entry_P to also buy calls
-OPTION_BUDGET  = 0.40            # fraction of equity position budget used for calls
+RISK_FREE_RATE = 0.045
+ENTRY_THRESH   = float(_cfg.get("backtest", {}).get("entry_thresh", 0.60))
+EXIT_THRESH    = float(_cfg.get("backtest", {}).get("exit_thresh", 0.65))
+MAX_HOLD_DAYS  = int(_cfg.get("backtest", {}).get("max_hold_days", 40))
+STOP_LOSS_PCT  = float(_cfg.get("backtest", {}).get("stop_loss_pct", 0.08))
+POS_SIZE_MAX   = float(_cfg.get("risk", {}).get("max_position_pct", 10)) / 100
+OPTION_THRESH  = float(_cfg.get("options", {}).get("long_call_min_lgbm_confidence", 0.82))
+OPTION_BUDGET  = float(_cfg.get("options", {}).get("long_call_budget_pct", 0.40))
 
 # Approximate regime from SPY vs 200-SMA + 20-day momentum
 def _approx_regime(spy_close: float, spy_sma200: float, spy_mom20: float) -> int:
