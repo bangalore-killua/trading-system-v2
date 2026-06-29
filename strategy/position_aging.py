@@ -208,6 +208,6 @@ class PositionAging:
             setup_type=setup_type,
         )
         action = result.get("partial_profit_action")
-        if action and action.get("action") == "partial_sell":
-            return True, float(action.get("sell_pct", 50))
+        if action and action.get("action") == "PARTIAL_PROFIT":
+            return True, float(action.get("sell_fraction", 0.33)) * 100
         return False, 0.0

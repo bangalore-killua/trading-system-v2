@@ -85,7 +85,7 @@ class SignalOrchestrator:
         Parameters
         ----------
         signal_inputs : {
-          "rsi_14", "macd", "vol_ratio", "momentum", "pattern_score",
+          "rsi", "macd", "vol_ratio", "momentum", "pattern_score",
           "news_score", "fundamental_score", "insider_score", "options_score",
           "macro_score", "4h_trend", "1d_regime_slope",
           "entry_model_prob",       # from AutoGluon/LightGBM
@@ -180,7 +180,7 @@ class SignalOrchestrator:
 
         # ── ENTRY log ─────────────────────────────────────────────────────────
         if _tl and trace_id:
-            rsi = signal_inputs.get("rsi_14")
+            rsi = signal_inputs.get("rsi")
             tl_stage(trace_id, symbol, "ENTRY", cycle_id).result("PASS" if action != "skip" else "SKIP").model({
                 "action": action, "composite": composite, "size_pct": round(size_pct * 100, 2), "vix_scale": vix_scale,
             }).decision(action).why(
@@ -208,7 +208,7 @@ class SignalOrchestrator:
         scores = {}
 
         # Technical: RSI (oversold = higher score)
-        rsi = inputs.get("rsi_14")
+        rsi = inputs.get("rsi")
         if rsi is not None:
             scores["technical"] = round(max(0, min(1, (70 - rsi) / 40)), 3)
 
