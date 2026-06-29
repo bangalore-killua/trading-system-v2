@@ -158,6 +158,9 @@
       "GLD"
     ]
   },
+  "hot_universe": {
+    "prewarm_timeout_seconds": 90
+  },
   "universe": {
     "hot_universe_ttl_hours": {
       "NEWS_EVENT": 4,

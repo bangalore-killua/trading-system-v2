@@ -297,9 +297,10 @@ class AutoGluonPipeline:
     TRANCHE_MODEL_PATH = "models/autogluon_tranche"
     SCORECARD_PATH     = "models/scorecard_entry_v1.json"
 
-    def __init__(self, symbols: list, years: int = 5):
-        self.symbols = symbols
-        self.years   = years
+    def __init__(self, symbols: list, years: int = 5, rolling_years: int = 4):
+        self.symbols       = symbols
+        self.years         = years
+        self.rolling_years = rolling_years  # drop labeled records older than this window
 
     def run_entry_model(self, time_limit: int = 3600) -> dict:
         """Train entry model. IC must be > 0 to proceed to exit model.
@@ -423,16 +424,36 @@ class AutoGluonPipeline:
         return {"model_path": self.TRANCHE_MODEL_PATH, "leaderboard": leaderboard, "n_samples": len(df)}
 
     def _collect_records(self) -> list:
-        """Run intelligent backtester for all symbols and return combined records."""
+        """Run intelligent backtester for all symbols and return combined records.
+
+        Records older than rolling_years are dropped so stale market-regime patterns
+        (e.g. 2020 COVID crash) do not dominate the model.
+        """
         from backtester.intelligent_backtest import run_backtest
+        from datetime import date, timedelta
+
+        cutoff = (date.today() - timedelta(days=self.rolling_years * 365)).isoformat()
         all_records = []
         for sym in self.symbols:
             try:
                 result = run_backtest(symbol=sym, years=self.years)
-                all_records.extend(result.get("records", []))
-                logger.info("  %s: %d records", sym, len(result.get("records", [])))
+                raw = result.get("records", [])
+                # Filter to rolling window — entry_date is stored as str "YYYY-MM-DD"
+                filtered = [
+                    r for r in raw
+                    if r and str(r.get("entry_date", "9999")) >= cutoff
+                ]
+                all_records.extend(filtered)
+                logger.info("  %s: %d records (%d after rolling cutoff %s)",
+                            sym, len(raw), len(filtered), cutoff)
             except Exception as e:
                 logger.warning("Backtest failed for %s: %s", sym, e)
+
+        if self.rolling_years < self.years:
+            logger.info(
+                "Rolling window applied: kept records >= %s (rolling_years=%d of years=%d fetched)",
+                cutoff, self.rolling_years, self.years,
+            )
         return all_records
 
     def _records_to_features(self, records: list, model_type: str) -> pd.DataFrame:
@@ -675,7 +696,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train entry/exit models")
     parser.add_argument("--symbols", nargs="+", help="Symbols (default: config watchlist)")
-    parser.add_argument("--years",   type=int, default=5)
+    parser.add_argument("--years",         type=int, default=5,
+                        help="Years of OHLCV to fetch (default 5)")
+    parser.add_argument("--rolling-years", type=int, default=4,
+                        help="Keep only labeled records within last N years (default 4). "
+                             "Use fewer than --years to drop stale market-regime patterns.")
     parser.add_argument("--live-only",     action="store_true")
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument("--autogluon",     action="store_true", help="Use AutoGluon + mlfinlab CPCV")
@@ -692,7 +717,7 @@ if __name__ == "__main__":
         with open(cfg_path) as f:
             config = json.load(f)
         syms   = args.symbols or config.get("watchlist", {}).get("mandatory", ["NVDA", "AAPL", "MSFT"])
-        pipe   = AutoGluonPipeline(symbols=syms, years=args.years)
+        pipe   = AutoGluonPipeline(symbols=syms, years=args.years, rolling_years=args.rolling_years)
         if args.dry_run:
             result = run_bootstrap(dry=True)
         elif args.exit_model:

@@ -79,6 +79,11 @@ class PositionManager:
         self._exit_monitor = None  # ExitMonitor — lazy-init on first exit evaluation
         self._dip_detector = None  # DipDetector — lazy-init on first entry evaluation
 
+        # Tranche pyramid tracking: symbol → {"level": 1|2|3, "entry_price": float, "atr": float}
+        # Level 1 = T1 (initial entry), 2 = T2 added, 3 = T3 added.
+        # Keyed by symbol, reset to 1 on new entry, deleted on full exit.
+        self._tranche_levels: Dict[str, dict] = {}
+
         # Pending news-driven confirms: symbol → asyncio.Event
         self._pending_news_confirms: Dict[str, asyncio.Event] = {}
         self._news_confirm_approvals: Dict[str, bool] = {}
@@ -252,6 +257,14 @@ class PositionManager:
             target_price=target_price,
         )
 
+        # Initialise tranche state at T1 so monitor_exits can check T2/T3 adds later
+        self._tranche_levels[symbol] = {
+            "level": 1,
+            "entry_price": fill.filled_avg_price,
+            "atr": atr or 0.0,
+            "entry_composite": size_multiplier,
+        }
+
         # ── EXECUTION log ─────────────────────────────────────────────────
         try:
             from data.logging.trade_logger import new_trace, WhyAnalyzer
@@ -416,6 +429,10 @@ class PositionManager:
         # Priority 5: Trailing stop
         await self._check_trailing_stop(symbol, pos_info, indicators)
 
+        # Priority 6: Tranche scale-up (T2 / T3 add — only if position still open after above)
+        if self._state.has_position(symbol):
+            await self._check_tranche_add(symbol, pos_info, df, indicators)
+
     async def _check_hard_exit(self, symbol: str, pos_info: dict) -> bool:
         """Hard exits: kill switch, CRITICAL threat, going concern 8-K."""
         from server.kill_switch import is_kill_switch_active  # type: ignore
@@ -462,6 +479,105 @@ class PositionManager:
 
         return False
 
+    async def _check_tranche_add(
+        self, symbol: str, pos_info: dict, df, indicators: dict
+    ) -> None:
+        """Evaluate whether to scale up an existing position via tranche pyramid (T2 or T3).
+
+        Conditions (from TrancheManager):
+          T2: price confirmed +1.5xATR above entry AND composite_score >= 0.35 AND level==1
+          T3: price at new high AND composite_score >= regime threshold AND level==2
+
+        Adds are capped at max_position_pct.  State tracked in self._tranche_levels.
+        """
+        state = self._tranche_levels.get(symbol)
+        if state is None:
+            return
+
+        current_level = state.get("level", 1)
+        if current_level >= 3:
+            return
+
+        days_held = pos_info.get("days_held", 0)
+        if days_held < 3:
+            return  # too early — let the position breathe
+
+        current_price = indicators.get("price", 0.0)
+        atr_14        = state.get("atr") or indicators.get("atr") or 0.0
+        entry_price   = state.get("entry_price") or pos_info.get("entry_price", 0.0)
+        composite     = state.get("entry_composite", 0.5)
+
+        if not (current_price and atr_14 and entry_price):
+            return
+
+        from strategy.tranche_manager import TrancheManager, TrancheState  # type: ignore
+        tm = TrancheManager()
+
+        if current_level == 1:
+            result = tm.should_add_t2(
+                state=TrancheState(
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    atr_14=atr_14,
+                    entry_composite=composite,
+                    regime=str(self._regime.get_current_regime()) if self._regime else "NEUTRAL",
+                    tranches=[{"shares": pos_info.get("qty", 0), "price": entry_price}],
+                ),
+                current_price=current_price,
+                composite_score=composite,
+            )
+        elif current_level == 2:
+            recent_high = float(df["high"].max()) if df is not None and "high" in df.columns else current_price
+            is_new_high = current_price >= recent_high * 0.995  # within 0.5% of recent high counts
+
+            result = tm.should_add_t3(
+                state=TrancheState(
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    atr_14=atr_14,
+                    entry_composite=composite,
+                    regime=str(self._regime.get_current_regime()) if self._regime else "NEUTRAL",
+                    tranches=[{}, {}],  # marks both T1 and T2 as open
+                ),
+                current_price=current_price,
+                composite_score=composite,
+                is_new_high=is_new_high,
+            )
+        else:
+            return
+
+        if result.get("action") not in ("add_t2", "add_t3"):
+            return
+
+        # Calculate add size (size_pct from TrancheManager, capped at max_position_pct)
+        add_pct      = result.get("size_pct", 0.03)
+        max_pct      = self._risk_cfg.get("max_position_pct", 5) / 100
+        add_pct      = min(add_pct, max_pct)
+        portfolio_value = await self._get_portfolio_value()
+        add_qty      = int(add_pct * portfolio_value / current_price) if current_price > 0 else 0
+
+        if add_qty <= 0:
+            return
+
+        fill = self._trader.place_market_buy(symbol, qty=add_qty)
+        if not fill.is_filled:
+            logger.warning("TRANCHE ADD FAILED: %s %s — %s", symbol, result["action"], fill.status)
+            return
+
+        new_level = 2 if current_level == 1 else 3
+        self._tranche_levels[symbol]["level"] = new_level
+
+        logger.info(
+            "TRANCHE %s: %s +%d shares @ $%.4f (reason: %s)",
+            result["action"].upper(), symbol, add_qty, fill.filled_avg_price, result.get("reason", ""),
+        )
+
+        if self._telegram:
+            await self._telegram.send_message(
+                f"Tranche {result['action'].upper()}: {symbol} +{add_qty} shares "
+                f"@ ${fill.filled_avg_price:.2f} | {result.get('reason', '')}"
+            )
+
     async def _check_trailing_stop(self, symbol: str, pos_info: dict, indicators: dict) -> None:
         """ATR-based trailing stop — activates only after position gains activation_pct."""
         entry_price = pos_info.get("entry_price", 0)
@@ -504,6 +620,7 @@ class PositionManager:
         if fill.is_filled:
             pnl = (fill.filled_avg_price - pos_info.get("entry_price", 0)) * fill.filled_qty
             self._state.remove_position(symbol)
+            self._tranche_levels.pop(symbol, None)  # clear tranche state on full exit
 
             if self._ledger:
                 self._ledger.log_exit(
