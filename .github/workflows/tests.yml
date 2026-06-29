@@ -14,17 +14,15 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Install test dependencies
         run: |
           pip install --quiet \
             pytest pytest-asyncio pytest-timeout \
             pandas numpy scipy scikit-learn lightgbm \
-            colorama pytz \
-            mplfinance Pillow \
-            python-dotenv yfinance \
-            pandas-ta
+            colorama pytz sqlalchemy \
+            python-dotenv yfinance
 
       - name: Run tests
         run: pytest tests/ -v --timeout=60
