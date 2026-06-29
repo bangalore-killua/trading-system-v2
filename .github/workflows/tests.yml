@@ -21,7 +21,8 @@ jobs:
           pip install --quiet \
             pytest pytest-asyncio pytest-timeout \
             pandas numpy scipy \
-            colorama pytz
+            colorama pytz \
+            mplfinance Pillow
 
       - name: Run tests
         run: pytest tests/ -v --timeout=60 -x
