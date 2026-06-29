@@ -52,6 +52,9 @@ from typing import Dict, List, Optional
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="autogluon")
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
