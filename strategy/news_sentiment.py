@@ -134,3 +134,78 @@ class FinBERTSentiment:
 
     def is_bearish(self, text: str, threshold: float = -0.50) -> bool:
         return self.score(text) <= threshold
+
+
+class MiniCPMSentiment:
+    """Financial sentiment via local MiniCPM-1B through Ollama (no API cost).
+
+    Scores text in [-1.0, +1.0] using a structured JSON prompt.
+    Activate in config.json: news.sentiment_model = "minicpm"
+
+    Install:
+      winget install Ollama.Ollama
+      ollama pull minicpm          # MiniCPM-1B (smallest, fastest)
+
+    Fine-tune for better accuracy:
+      python scripts/finetune_minicpm_sentiment.py
+      ollama create minicpm-finetune -f models/minicpm_sentiment_lora/Modelfile
+      config: news.sentiment_model = "minicpm-finetune"
+    """
+
+    OLLAMA_URL = "http://localhost:11434/api/generate"
+
+    def __init__(self, model: str = "minicpm", timeout: float = 10.0):
+        self._model   = model
+        self._timeout = timeout
+        self._warned  = False
+
+    def score(self, text: str) -> float:
+        """Score a single text. Returns float in [-1.0, +1.0], 0.0 on failure."""
+        if not text or not text.strip():
+            return 0.0
+        prompt = (
+            "You are a financial news sentiment analyser. "
+            'Reply with JSON only: {"sentiment": "positive|neutral|negative", "score": <float -1 to 1>}\n\n'
+            f"Text: {text[:800]}"
+        )
+        try:
+            import json as _json
+            import httpx
+            resp = httpx.post(
+                self.OLLAMA_URL,
+                json={"model": self._model, "prompt": prompt, "stream": False,
+                      "options": {"temperature": 0.0, "num_predict": 60}},
+                timeout=self._timeout,
+            )
+            resp.raise_for_status()
+            raw    = resp.json().get("response", "").strip()
+            raw    = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
+            parsed = _json.loads(raw)
+            val    = float(parsed.get("score", 0.0))
+            return max(-1.0, min(1.0, val))
+        except Exception as e:
+            if not self._warned:
+                logger.warning("MiniCPM sentiment unavailable (%s) -- returning 0.0", e)
+                self._warned = True
+            return 0.0
+
+    def score_batch(self, texts: list) -> list:
+        """Score a list of texts via per-item calls (Ollama local, no rate limit)."""
+        return [self.score(t) for t in texts]
+
+    def is_bullish(self, text: str, threshold: float = 0.40) -> bool:
+        return self.score(text) >= threshold
+
+    def is_bearish(self, text: str, threshold: float = -0.30) -> bool:
+        return self.score(text) <= threshold
+
+
+def get_sentiment_model(config: dict):
+    """Factory: return FinBERTSentiment or MiniCPMSentiment based on config.
+
+    config key: news.sentiment_model = "finbert" (default) | "minicpm" | "minicpm-finetune"
+    """
+    model_name = config.get("news", {}).get("sentiment_model", "finbert")
+    if model_name.startswith("minicpm"):
+        return MiniCPMSentiment(model=model_name)
+    return FinBERTSentiment()
