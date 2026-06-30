@@ -361,6 +361,8 @@ tr:hover td { background: var(--bg-hover); }
   <div class="search-row">
     <input type="text" id="symbol-input" placeholder="Enter ticker (e.g. NVDA, AAPL, TSLA)" autocomplete="off" spellcheck="false" />
     <button class="btn" onclick="analyseSymbol()">Analyse</button>
+    <button class="btn" id="sym-refresh-btn" onclick="analyseSymbol()" style="display:none">Refresh</button>
+    <span class="sub" id="sym-refresh-countdown" style="margin-left:8px"></span>
   </div>
 
   <div id="symbol-panel" style="display:none">
@@ -654,6 +656,7 @@ async function analyseSymbol() {
   if (!sym) return;
   currentSymbol = sym;
   $('symbol-panel').style.display = 'block';
+  $('sym-refresh-btn').style.display = 'inline-block';
 
   // Load all tabs in parallel
   loadOverview(sym);
@@ -669,6 +672,35 @@ async function analyseSymbol() {
   loadSymbolNews(sym);
   loadGraph(1);
   loadSignalChart(sym);   // decision overlay chart
+  loadCOT();
+
+  startSymbolRefresh();
+}
+
+/* ── Symbol auto-refresh (5 min) ────────────────────────────── */
+let _symRefreshInterval = null;
+let _symRefreshTimer    = 300;
+
+function startSymbolRefresh() {
+  clearInterval(_symRefreshInterval);
+  _symRefreshTimer = 300;
+  renderSymbolCountdown();
+  _symRefreshInterval = setInterval(() => {
+    _symRefreshTimer--;
+    if (_symRefreshTimer <= 0) {
+      analyseSymbol();
+      return;
+    }
+    renderSymbolCountdown();
+  }, 1000);
+}
+
+function renderSymbolCountdown() {
+  const el = $('sym-refresh-countdown');
+  if (!el) return;
+  const m = Math.floor(_symRefreshTimer / 60);
+  const s = String(_symRefreshTimer % 60).padStart(2, '0');
+  el.textContent = `Refresh in ${m}:${s}`;
 }
 
 // ── Signal decision chart ──────────────────────────────────────────────────
