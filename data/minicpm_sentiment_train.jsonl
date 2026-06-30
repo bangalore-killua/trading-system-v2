@@ -1,0 +1,183 @@
+{"text": "Company crushes Q3 earnings, beats EPS by 18%, raises full-year revenue guidance by 12%", "sentiment": "positive", "score": 0.92}
+{"text": "SEC launches formal investigation into accounting irregularities and revenue recognition practices", "sentiment": "negative", "score": -0.88}
+{"text": "Q2 results in line with analyst consensus, management reaffirms guidance", "sentiment": "neutral", "score": 0.05}
+{"text": "Board approves $5B share buyback program, dividend increased 15%", "sentiment": "positive", "score": 0.85}
+{"text": "Company misses earnings by 22%, withdraws full-year guidance citing macro uncertainty", "sentiment": "negative", "score": -0.91}
+{"text": "CEO resigns unexpectedly, CFO appointed interim, board initiates search", "sentiment": "negative", "score": -0.75}
+{"text": "FDA grants breakthrough therapy designation for lead oncology drug", "sentiment": "positive", "score": 0.88}
+{"text": "Phase 3 trial fails primary endpoint, drug development program terminated", "sentiment": "negative", "score": -0.93}
+{"text": "Company announces strategic review of business units, no outcome determined yet", "sentiment": "neutral", "score": -0.1}
+{"text": "Goldman Sachs upgrades to Buy with $320 price target, cites margin expansion thesis", "sentiment": "positive", "score": 0.78}
+{"text": "Morgan Stanley downgrades to Underweight, cuts price target 35% on demand concerns", "sentiment": "negative", "score": -0.82}
+{"text": "Deutsche Bank initiates coverage at Hold with $155 price target", "sentiment": "neutral", "score": 0.0}
+{"text": "Insider purchases: CEO buys 50,000 shares at $142, CFO adds 20,000 shares", "sentiment": "positive", "score": 0.72}
+{"text": "Insider selling: Director sells 80% of position worth $4.2M over 3 days", "sentiment": "negative", "score": -0.65}
+{"text": "Company reports solid quarter with revenue up 8% YoY, maintains guidance midpoint", "sentiment": "positive", "score": 0.45}
+{"text": "Federal Reserve raises rates 50bps, signals two more hikes this year", "sentiment": "negative", "score": -0.55}
+{"text": "CPI comes in at 3.1%, below expectations of 3.4%, core inflation easing", "sentiment": "positive", "score": 0.62}
+{"text": "Jobs report: 280K non-farm payrolls added, unemployment holds at 3.7%", "sentiment": "positive", "score": 0.35}
+{"text": "Company files for Chapter 11 bankruptcy protection, seeks restructuring", "sentiment": "negative", "score": -0.97}
+{"text": "Merger agreement signed at 28% premium to yesterday's closing price", "sentiment": "positive", "score": 0.87}
+{"text": "Antitrust regulators block proposed acquisition, deal terminated", "sentiment": "negative", "score": -0.72}
+{"text": "Company wins $2.3B government contract for 5-year cloud infrastructure deployment", "sentiment": "positive", "score": 0.83}
+{"text": "Major customer cancels contract representing 15% of annual revenue", "sentiment": "negative", "score": -0.86}
+{"text": "Product recall issued for safety defect, 2.4M units affected globally", "sentiment": "negative", "score": -0.79}
+{"text": "Company launches new AI-powered platform, initial customer reception positive", "sentiment": "positive", "score": 0.60}
+{"text": "Quarterly revenue grows 3% YoY, slightly below the 5% consensus estimate", "sentiment": "negative", "score": -0.25}
+{"text": "Operating margin expands 200bps to 24.5%, driven by cost optimization", "sentiment": "positive", "score": 0.68}
+{"text": "Free cash flow turns negative for second consecutive quarter", "sentiment": "negative", "score": -0.70}
+{"text": "Company announces 8% workforce reduction, expects $400M in annualized savings", "sentiment": "negative", "score": -0.45}
+{"text": "New manufacturing facility opens on schedule, adds 15% capacity", "sentiment": "positive", "score": 0.55}
+{"text": "Patent dispute settled out of court, terms undisclosed", "sentiment": "neutral", "score": 0.0}
+{"text": "Annual recurring revenue surpasses $1B milestone for first time", "sentiment": "positive", "score": 0.76}
+{"text": "Net revenue retention rate drops to 108% from 118% prior year", "sentiment": "negative", "score": -0.52}
+{"text": "Company successfully prices $500M senior notes offering at favorable terms", "sentiment": "neutral", "score": 0.1}
+{"text": "Credit rating downgraded to BB+ from BBB-, outlook negative", "sentiment": "negative", "score": -0.73}
+{"text": "Moody's upgrades outlook to positive, cites improved leverage ratios", "sentiment": "positive", "score": 0.60}
+{"text": "Class action lawsuit filed alleging securities fraud and misleading statements", "sentiment": "negative", "score": -0.80}
+{"text": "DOJ investigation closed with no charges filed", "sentiment": "positive", "score": 0.65}
+{"text": "Company beats on revenue but misses on EPS due to one-time restructuring charge", "sentiment": "neutral", "score": -0.05}
+{"text": "Gross margin contracts 180bps due to elevated input costs and supply chain pressure", "sentiment": "negative", "score": -0.58}
+{"text": "New CEO appointed from outside, former Amazon executive with strong operational track record", "sentiment": "positive", "score": 0.50}
+{"text": "Activist investor discloses 8% stake, pushes for breakup of conglomerate structure", "sentiment": "positive", "score": 0.55}
+{"text": "Short seller publishes report alleging revenue inflation, stock halted", "sentiment": "negative", "score": -0.89}
+{"text": "Company responds to short report, denies all allegations, independent audit announced", "sentiment": "neutral", "score": -0.15}
+{"text": "Semiconductor shortage easing, lead times improving for key components", "sentiment": "positive", "score": 0.55}
+{"text": "Supply chain disruption causes production halt at primary manufacturing site", "sentiment": "negative", "score": -0.77}
+{"text": "Company enters new market through strategic partnership with industry leader", "sentiment": "positive", "score": 0.62}
+{"text": "Joint venture dissolved after 18 months, both parties cite strategic differences", "sentiment": "negative", "score": -0.40}
+{"text": "Clinical trial shows drug effective in 67% of patients vs 34% for placebo", "sentiment": "positive", "score": 0.85}
+{"text": "Drug approved by FDA with broader label than expected, covering two additional indications", "sentiment": "positive", "score": 0.91}
+{"text": "Generic competition enters market earlier than expected, pricing pressure accelerating", "sentiment": "negative", "score": -0.67}
+{"text": "Company reports record quarterly bookings of $3.8B, backlog grows 22%", "sentiment": "positive", "score": 0.82}
+{"text": "Churn rate increases to 6.2% from 4.1% prior year, customer losses accelerating", "sentiment": "negative", "score": -0.78}
+{"text": "Management reaffirms full-year guidance at analyst day, no surprises", "sentiment": "neutral", "score": 0.05}
+{"text": "Company pre-announces revenue shortfall, guide-down expected to be 12-15% below consensus", "sentiment": "negative", "score": -0.87}
+{"text": "Earnings beat consensus by 8% for the fifth consecutive quarter", "sentiment": "positive", "score": 0.80}
+{"text": "Dividend cut by 40% to preserve cash, capex program paused", "sentiment": "negative", "score": -0.76}
+{"text": "Special dividend of $3.50 per share declared, payable next month", "sentiment": "positive", "score": 0.70}
+{"text": "Company completes $800M debt refinancing, extends maturities by 5 years at lower rate", "sentiment": "positive", "score": 0.52}
+{"text": "Leverage ratio reaches 5.8x EBITDA, approaching covenant limit", "sentiment": "negative", "score": -0.71}
+{"text": "Customer concentration risk: top 3 customers now represent 58% of revenue", "sentiment": "negative", "score": -0.48}
+{"text": "Geographic revenue diversification improving, international now 42% of total", "sentiment": "positive", "score": 0.40}
+{"text": "Tariff exemption granted for key imported components, relief through 2026", "sentiment": "positive", "score": 0.58}
+{"text": "New tariffs announced on imported goods, company estimates $200M annual headwind", "sentiment": "negative", "score": -0.65}
+{"text": "ESG rating upgraded to AA from BBB by MSCI, improves institutional investor eligibility", "sentiment": "positive", "score": 0.30}
+{"text": "Environmental violation fines totaling $180M assessed by EPA", "sentiment": "negative", "score": -0.62}
+{"text": "Company wins bid for infrastructure project, largest in company history", "sentiment": "positive", "score": 0.75}
+{"text": "Audit committee identifies material weakness in internal controls over financial reporting", "sentiment": "negative", "score": -0.83}
+{"text": "Restatement of prior year financials, revenue reduced by $340M", "sentiment": "negative", "score": -0.90}
+{"text": "CFO departure announced, promoted internally from controller role", "sentiment": "negative", "score": -0.35}
+{"text": "IPO priced at top of range, shares surge 34% on first day of trading", "sentiment": "positive", "score": 0.78}
+{"text": "SPAC merger vote fails, deal collapses, company remains private", "sentiment": "negative", "score": -0.45}
+{"text": "Spin-off of business unit completed, shareholders receive 0.4 shares of new entity", "sentiment": "neutral", "score": 0.1}
+{"text": "Market share gains of 3.2 percentage points in core segment over past 12 months", "sentiment": "positive", "score": 0.68}
+{"text": "Losing market share to new entrant, pricing concessions required to retain accounts", "sentiment": "negative", "score": -0.66}
+{"text": "Net promoter score reaches all-time high of 72, customer satisfaction strong", "sentiment": "positive", "score": 0.45}
+{"text": "Product liability settlement of $1.2B reached with plaintiffs", "sentiment": "negative", "score": -0.60}
+{"text": "R&D spending increased 25% as company accelerates innovation pipeline", "sentiment": "positive", "score": 0.42}
+{"text": "Revenue guidance for next quarter set below consensus at midpoint", "sentiment": "negative", "score": -0.55}
+{"text": "Conference call tone cautious, management highlights macro headwinds multiple times", "sentiment": "negative", "score": -0.40}
+{"text": "Conference call bullish, management raises long-term margin target by 300bps", "sentiment": "positive", "score": 0.72}
+{"text": "Quarterly sequential growth decelerates to 1.2% from 4.5% prior quarter", "sentiment": "negative", "score": -0.48}
+{"text": "Company achieves profitability milestone, first GAAP profitable quarter", "sentiment": "positive", "score": 0.80}
+{"text": "Cash burn rate of $180M per quarter with 6 quarters of runway remaining", "sentiment": "negative", "score": -0.70}
+{"text": "Strong balance sheet: $4.2B cash, no debt, well-positioned for downturn", "sentiment": "positive", "score": 0.65}
+{"text": "Debt maturity wall of $3.8B due in 18 months, refinancing risk elevated", "sentiment": "negative", "score": -0.72}
+{"text": "Convertible note offering of $600M completed, dilution limited at current share price", "sentiment": "neutral", "score": -0.15}
+{"text": "Secondary offering of 12M shares priced at 4% discount, overhang cleared", "sentiment": "negative", "score": -0.30}
+{"text": "Index inclusion confirmed: added to S&P 500 effective next rebalance", "sentiment": "positive", "score": 0.70}
+{"text": "Removed from Russell 1000 index due to market cap decline below threshold", "sentiment": "negative", "score": -0.55}
+{"text": "Company announces stock split 3-for-1, effective end of quarter", "sentiment": "positive", "score": 0.40}
+{"text": "Volume spike on no news: 8x average daily volume, speculation about takeout", "sentiment": "positive", "score": 0.35}
+{"text": "Peer company files for bankruptcy, concerns about industry-wide credit conditions", "sentiment": "negative", "score": -0.50}
+{"text": "Sector tailwind: regulatory changes favourable for industry, company well-positioned", "sentiment": "positive", "score": 0.55}
+{"text": "Pricing power remains strong, company passes through 9% cost increase to customers", "sentiment": "positive", "score": 0.65}
+{"text": "Unable to pass through cost increases, margins compressing across all segments", "sentiment": "negative", "score": -0.68}
+{"text": "AI partnership announced with Microsoft Azure, joint go-to-market strategy", "sentiment": "positive", "score": 0.72}
+{"text": "Key technology license expires, renewal negotiations ongoing with uncertain outcome", "sentiment": "negative", "score": -0.45}
+{"text": "International expansion ahead of plan, three new markets launched this quarter", "sentiment": "positive", "score": 0.60}
+{"text": "Operations in key region suspended due to geopolitical instability", "sentiment": "negative", "score": -0.70}
+{"text": "Inventory levels normalizing after 18 months of elevated buildup", "sentiment": "positive", "score": 0.45}
+{"text": "Inventory write-down of $420M taken as demand outlook weakens", "sentiment": "negative", "score": -0.75}
+{"text": "Raised to Overweight at JPMorgan, price target increased $40 to $285", "sentiment": "positive", "score": 0.75}
+{"text": "Cut to Sell at Bernstein, analyst cites valuation at 45x forward earnings as stretched", "sentiment": "negative", "score": -0.70}
+{"text": "Consensus EPS estimates revised up 12% over past 30 days across 18 analysts", "sentiment": "positive", "score": 0.78}
+{"text": "Consensus EPS estimates cut 18% over past month following profit warning", "sentiment": "negative", "score": -0.80}
+{"text": "Data breach confirmed: 2.1M customer records accessed, investigation underway", "sentiment": "negative", "score": -0.82}
+{"text": "Cybersecurity audit finds no material vulnerabilities, systems certified", "sentiment": "positive", "score": 0.40}
+{"text": "Strong holiday season: same-store sales up 6.8%, e-commerce grows 24%", "sentiment": "positive", "score": 0.80}
+{"text": "Weak consumer spending drags comparable store sales down 3.2%", "sentiment": "negative", "score": -0.65}
+{"text": "Customer adds 2,400 enterprise accounts this quarter, largest cohort ever", "sentiment": "positive", "score": 0.82}
+{"text": "Net new ARR misses target by 30%, sales cycle elongation continues", "sentiment": "negative", "score": -0.75}
+{"text": "Company repurchased $1.1B of stock at average of $167, 6.4M shares retired", "sentiment": "positive", "score": 0.60}
+{"text": "Management increases share repurchase authorization by $3B", "sentiment": "positive", "score": 0.65}
+{"text": "Founder sells entire remaining stake worth $890M through 10b5-1 plan", "sentiment": "negative", "score": -0.60}
+{"text": "Long-term debt to equity ratio improves to 0.4x from 1.1x over two years", "sentiment": "positive", "score": 0.55}
+{"text": "Pension obligation underfunded by $2.8B, actuarial assumptions revised", "sentiment": "negative", "score": -0.55}
+{"text": "Capacity utilization reaches 94%, pricing power improving in tight supply environment", "sentiment": "positive", "score": 0.68}
+{"text": "Factory utilization falls to 61%, idle capacity weighs on fixed cost absorption", "sentiment": "negative", "score": -0.67}
+{"text": "Company achieves carbon neutrality target 5 years ahead of schedule", "sentiment": "positive", "score": 0.35}
+{"text": "Regulatory approval received in EU, clearing path to full European launch", "sentiment": "positive", "score": 0.72}
+{"text": "Product banned in key market pending safety review, $350M revenue at risk", "sentiment": "negative", "score": -0.80}
+{"text": "Turnaround progressing: fourth consecutive quarter of sequential improvement in margins", "sentiment": "positive", "score": 0.70}
+{"text": "Restructuring charges higher than guided, cost savings program delayed by 18 months", "sentiment": "negative", "score": -0.58}
+{"text": "Annual contract value per customer increases 22%, upsell motion gaining traction", "sentiment": "positive", "score": 0.75}
+{"text": "Payroll cut by 12%, second round of layoffs in six months signals execution issues", "sentiment": "negative", "score": -0.70}
+{"text": "Government stimulus spending directly benefits company's infrastructure segment", "sentiment": "positive", "score": 0.58}
+{"text": "Interest expense increases $180M YoY due to floating rate debt exposure", "sentiment": "negative", "score": -0.50}
+{"text": "Working capital management improves, cash conversion cycle shortened by 14 days", "sentiment": "positive", "score": 0.48}
+{"text": "Accounts receivable days outstanding spikes to 87 days, collections slowing", "sentiment": "negative", "score": -0.60}
+{"text": "New product launches on schedule, early sell-through rates exceed internal targets", "sentiment": "positive", "score": 0.72}
+{"text": "Product launch delayed 9 months due to manufacturing quality issues", "sentiment": "negative", "score": -0.65}
+{"text": "Signed 3-year preferred vendor agreement with Fortune 500 customer", "sentiment": "positive", "score": 0.62}
+{"text": "Lost preferred vendor status with top 3 customer, contract not renewed", "sentiment": "negative", "score": -0.78}
+{"text": "Quarterly results mixed: revenue beats, EPS misses on higher operating expenses", "sentiment": "neutral", "score": -0.08}
+{"text": "Operating leverage improving as revenue scales faster than headcount", "sentiment": "positive", "score": 0.65}
+{"text": "SG&A expenses growing faster than revenue, operating leverage deteriorating", "sentiment": "negative", "score": -0.52}
+{"text": "Brand survey shows strongest consumer preference in company history", "sentiment": "positive", "score": 0.45}
+{"text": "Reputational damage from controversy weighing on brand perception metrics", "sentiment": "negative", "score": -0.60}
+{"text": "Global rollout of flagship product completes in 142 countries, on schedule", "sentiment": "positive", "score": 0.65}
+{"text": "Commodity prices decline 20%, input cost tailwind supports margin recovery", "sentiment": "positive", "score": 0.60}
+{"text": "Commodity prices surge 35%, raw material cost headwind of $450M expected next year", "sentiment": "negative", "score": -0.68}
+{"text": "Dollar strengthening creates 6% FX headwind on reported revenues", "sentiment": "negative", "score": -0.42}
+{"text": "FX tailwind of 4% expected next quarter as dollar weakens", "sentiment": "positive", "score": 0.35}
+{"text": "Company completes transformative acquisition 45 days ahead of schedule", "sentiment": "positive", "score": 0.65}
+{"text": "Integration challenges post-acquisition: revenue synergies tracking below target", "sentiment": "negative", "score": -0.55}
+{"text": "Goodwill impairment charge of $1.4B taken on acquired business", "sentiment": "negative", "score": -0.72}
+{"text": "Capital allocation priorities shift to organic growth and debt reduction", "sentiment": "neutral", "score": 0.05}
+{"text": "Return on invested capital improves to 18.2% from 14.1% two years ago", "sentiment": "positive", "score": 0.70}
+{"text": "ROIC declines to 8.3%, below cost of capital for the first time in a decade", "sentiment": "negative", "score": -0.73}
+{"text": "Tax rate guidance reduced to 16% following new jurisdiction structuring", "sentiment": "positive", "score": 0.38}
+{"text": "Tax authority demands $1.6B in back taxes, company contesting vigorously", "sentiment": "negative", "score": -0.72}
+{"text": "No material impact expected from proposed regulatory changes, company well-positioned", "sentiment": "positive", "score": 0.35}
+{"text": "New regulation imposes price controls on core product, $600M revenue at risk", "sentiment": "negative", "score": -0.80}
+{"text": "Spinoff creates pure-play entity, unlocking hidden value per sum-of-parts analysis", "sentiment": "positive", "score": 0.65}
+{"text": "Peers reporting double-digit growth while this company grows only 2%", "sentiment": "negative", "score": -0.55}
+{"text": "Outperforming peers on margins by 400-600bps across most major segments", "sentiment": "positive", "score": 0.68}
+{"text": "Joint venture contributes $280M equity income, ahead of expectations", "sentiment": "positive", "score": 0.58}
+{"text": "Total addressable market expanding due to new use case adoption", "sentiment": "positive", "score": 0.50}
+{"text": "Guidance assumes second half recovery that analysts view as optimistic", "sentiment": "negative", "score": -0.40}
+{"text": "Beat-and-raise quarter: EPS beats by 14%, next quarter guidance raised 10%", "sentiment": "positive", "score": 0.88}
+{"text": "Miss-and-lower quarter: EPS misses by 11%, next quarter guide cut 15% below consensus", "sentiment": "negative", "score": -0.90}
+{"text": "Company hits Rule of 40 for first time: growth + margin = 42%", "sentiment": "positive", "score": 0.78}
+{"text": "Rule of 40 score deteriorates to 28 as growth slows and margins compress", "sentiment": "negative", "score": -0.60}
+{"text": "Board refreshed with three independent directors following activist campaign", "sentiment": "positive", "score": 0.40}
+{"text": "Quarterly earnings call abruptly ended after 25 minutes, minimal management commentary", "sentiment": "negative", "score": -0.50}
+{"text": "Analyst day held, management provides three-year targets that exceed consensus", "sentiment": "positive", "score": 0.75}
+{"text": "Analyst day cancelled without rescheduling, investor confidence shaken", "sentiment": "negative", "score": -0.62}
+{"text": "Employee satisfaction survey ranks company top 10 employer, low voluntary attrition", "sentiment": "positive", "score": 0.32}
+{"text": "Key engineering team departs en masse to well-funded competitor", "sentiment": "negative", "score": -0.65}
+{"text": "Platform ecosystem grows to 8,400 third-party developers, up 60% YoY", "sentiment": "positive", "score": 0.62}
+{"text": "Cloud migration complete: 95% of workloads on AWS, $120M annual infra savings", "sentiment": "positive", "score": 0.55}
+{"text": "On-premise contract lock-in prevents cloud transition, growth constrained", "sentiment": "negative", "score": -0.48}
+{"text": "Net interest margin expands 40bps, loan growth outpaces deposit cost increases", "sentiment": "positive", "score": 0.65}
+{"text": "Non-performing loans increase to 3.8% of portfolio, provisioning accelerates", "sentiment": "negative", "score": -0.72}
+{"text": "Tier 1 capital ratio reaches 14.2%, well above regulatory minimum", "sentiment": "positive", "score": 0.55}
+{"text": "Stress test reveals capital shortfall under severe scenario, buffer inadequate", "sentiment": "negative", "score": -0.78}
+{"text": "Insurance loss ratio improves to 61%, underwriting profitability strong", "sentiment": "positive", "score": 0.65}
+{"text": "Catastrophic weather events drive combined ratio to 108%, underwriting loss", "sentiment": "negative", "score": -0.72}
+{"text": "Same-property NOI growth of 5.8% driven by strong rent increases and occupancy", "sentiment": "positive", "score": 0.68}
+{"text": "Occupancy rates decline to 88%, below the 93% needed for full cost recovery", "sentiment": "negative", "score": -0.65}
+{"text": "Lease renewal rate of 92%, tenant retention remains strong", "sentiment": "positive", "score": 0.58}
+{"text": "Major tenant files for bankruptcy, 8% of portfolio at risk of vacancy", "sentiment": "negative", "score": -0.75}

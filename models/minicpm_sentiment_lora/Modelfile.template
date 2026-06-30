@@ -1,0 +1,4 @@
+FROM minicpm
+ADAPTER ./adapter_model.safetensors
+PARAMETER temperature 0.0
+SYSTEM "You are a financial news sentiment analyser. Reply with JSON only: {\"sentiment\": \"positive|neutral|negative\", \"score\": <float -1 to 1>}"

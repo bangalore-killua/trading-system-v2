@@ -227,6 +227,21 @@ class TradingScheduler:
             name="Retrain LightGBM meta-model on live trade labels",
         )
 
+        # PATH B event-driven retrain: if >= retrain_min_samples new closed trades
+        # since last retrain, trigger an early retrain at next 4:30 PM close.
+        # Runs daily alongside performance report — only fires retrain when threshold met.
+        self._scheduler.add_job(
+            self._check_retrain_trigger,
+            trigger=CronTrigger(
+                hour=sched_cfg.get("performance_report_hour", 16),
+                minute=sched_cfg.get("performance_report_minute", 45),
+            ),
+            id="check_retrain_trigger",
+            max_instances=1,
+            misfire_grace_time=1800,
+            name="PATH B: check if enough new trades to trigger early retrain",
+        )
+
         # ── v14: Weekly model health digest (Sunday 8am) ────────────────────
         self._scheduler.add_job(
             self._send_model_health_report,
@@ -480,9 +495,22 @@ class TradingScheduler:
                 )
 
     async def _generate_performance_report(self) -> None:
-        """Generate daily quantstats HTML tearsheet after market close (4:30pm)."""
+        """Generate daily quantstats HTML tearsheet + opportunity audit after market close (4:30pm)."""
+        # Always run the opportunity audit regardless of quantstats availability
+        try:
+            from strategy.daily_report import generate as daily_report_generate  # type: ignore
+            rpt_path = daily_report_generate(state=None)
+            logger.info("Daily opportunity report: %s", rpt_path)
+            if self.telegram:
+                text = rpt_path.read_text(encoding="utf-8")
+                # Send the summary block only (last ~25 lines) to avoid Telegram 4096-char limit
+                tail = "\n".join(text.splitlines()[-25:])
+                await self.telegram.send_message(f"<pre>{tail}</pre>")
+        except Exception as exc:
+            logger.exception("Daily opportunity report failed")
+
         if not self.db:
-            logger.debug("db not wired — skipping performance report")
+            logger.debug("db not wired — skipping quantstats performance report")
             return
         try:
             import os
@@ -556,13 +584,70 @@ class TradingScheduler:
                     affects="Weekly model IC digest — no Telegram report this Sunday",
                 )
 
+    async def _check_retrain_trigger(self) -> None:
+        """PATH B event-driven retrain: trigger LightGBM retrain when enough new trades.
+
+        Counts OUTCOME-stage rows in trade_logs since the scorecard's trained_at timestamp.
+        When the count crosses retrain_min_samples, calls _retrain_meta_model() immediately
+        instead of waiting until next Sunday.
+        """
+        if not self.training_pipeline:
+            return
+
+        min_samples = int(self._cfg.get("model", {}).get("retrain_min_samples", 500))
+
+        # Read when the model was last trained
+        try:
+            import json
+            from pathlib import Path as _Path
+            scorecard = json.loads(_Path("models/scorecard_entry_v1.json").read_text())
+            last_trained = scorecard.get("trained_at", "")
+        except Exception:
+            last_trained = ""
+
+        # Count closed trades (OUTCOME stage) since last retrain
+        try:
+            import sqlite3
+            from pathlib import Path as _Path
+            db_path = _Path("logs/trade_lifecycle.db")
+            if not db_path.exists():
+                return
+            conn = sqlite3.connect(str(db_path))
+            if last_trained:
+                n_new = conn.execute(
+                    "SELECT COUNT(*) FROM trade_logs WHERE stage='OUTCOME' AND ts > ?",
+                    (last_trained,),
+                ).fetchone()[0]
+            else:
+                n_new = conn.execute(
+                    "SELECT COUNT(*) FROM trade_logs WHERE stage='OUTCOME'"
+                ).fetchone()[0]
+            conn.close()
+        except Exception as exc:
+            logger.debug("PATH B retrain check: DB query failed (%s)", exc)
+            return
+
+        logger.info(
+            "PATH B retrain check: %d new OUTCOME rows since %s (threshold %d)",
+            n_new, last_trained or "epoch", min_samples,
+        )
+
+        if n_new >= min_samples:
+            logger.info("PATH B: %d new trades >= %d threshold — triggering early retrain", n_new, min_samples)
+            if self.telegram:
+                await self.telegram.send_message(
+                    f"PATH B retrain triggered: {n_new} new trades since last train "
+                    f"(threshold {min_samples})"
+                )
+            await self._retrain_meta_model()
+
     def _on_hot_symbol(self, symbol: str, source: str) -> None:
         """Callback fired by HOT_UNIVERSE when a new symbol enters.
 
         Schedules immediate entry evaluation for this symbol without waiting
         for the next 60-minute watchlist scoring cycle.
         """
-        logger.info("HOT_UNIVERSE callback: %s via %s → immediate entry eval", symbol, source)
+        logger.info("HOT_UNIVERSE callback: %s via %s → queuing pre-warm then entry eval", symbol, source)
 
         # Schedule as a one-shot job that runs ASAP (not in the callback thread)
         self._scheduler.add_job(
@@ -573,11 +658,63 @@ class TradingScheduler:
             misfire_grace_time=30,
         )
 
+    async def _prewarm_hot_symbol(self, symbol: str) -> None:
+        """Wait for sector profiler + fundamentals before first evaluate_entry() call.
+
+        New hot-universe symbols default to sector_bucket='OTHER' and NaN fundamentals
+        until async background tasks complete.  Firing evaluate_entry() before they finish
+        gives the ML model systematically wrong features → low confidence → missed entries.
+
+        This coroutine blocks _evaluate_hot_entry for up to prewarm_timeout_seconds so
+        that the first evaluation sees real sector and fundamental data.
+        """
+        hot_cfg = self._cfg.get("hot_universe", {})
+        timeout = float(hot_cfg.get("prewarm_timeout_seconds", 90))
+        deadline = datetime.utcnow().timestamp() + timeout
+
+        # 1. Kick off sector classifier proactively (it also fires lazily inside scorer,
+        #    but starting it here gives maximum lead time).
+        try:
+            import threading
+            from data.sources.symbol_profiler import classify_symbol  # type: ignore
+            threading.Thread(target=classify_symbol, args=(symbol,), daemon=True).start()
+        except Exception:
+            pass  # profiler unavailable — fallback to lazy-init inside scorer
+
+        # 2. Wait until sector is classified (or timeout)
+        sector_ready = False
+        while datetime.utcnow().timestamp() < deadline:
+            try:
+                from strategy.scorer import _DYNAMIC_SECTOR_CACHE  # type: ignore
+                if _DYNAMIC_SECTOR_CACHE.get(symbol):
+                    sector_ready = True
+                    break
+            except Exception:
+                break
+            await asyncio.sleep(2)
+
+        elapsed = round(timeout - (deadline - datetime.utcnow().timestamp()), 1)
+        logger.info(
+            "[PREWARM] %s: sector=%s after %.1fs",
+            symbol,
+            _DYNAMIC_SECTOR_CACHE.get(symbol, "OTHER") if sector_ready else "OTHER (timeout)",
+            elapsed,
+        )
+
+        # 3. Pre-fetch fundamentals so they are cached before evaluate_entry() runs
+        if self.fundamentals_fetcher:
+            try:
+                await self.fundamentals_fetcher.prefetch_watchlist([symbol])
+                logger.info("[PREWARM] %s: fundamentals pre-fetched", symbol)
+            except Exception as exc:
+                logger.debug("[PREWARM] %s: fundamentals pre-fetch failed (%s) — continuing", symbol, exc)
+
     async def _evaluate_hot_entry(self, symbol: str, source: str) -> None:
-        """Evaluate a HOT_UNIVERSE symbol for entry immediately."""
+        """Pre-warm data then evaluate a HOT_UNIVERSE symbol for entry."""
         if not self.position_manager:
             return
         try:
+            await self._prewarm_hot_symbol(symbol)
             await self.position_manager.evaluate_entry(symbol, source=source)
         except Exception as exc:
             logger.exception("Hot entry eval error for %s", symbol)
